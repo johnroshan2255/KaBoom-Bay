@@ -61,7 +61,7 @@ export class Sandbox {
     this.pad = stand.clone().addScaledVector(inward, 1.1).add(new THREE.Vector3(0, 0.5 + BOMB_RADIUS, 0));
     this.orbit.target.copy(this.island.center).setY(4);
     this.orbit.yaw = Math.atan2(this.pad.x - this.island.center.x, this.pad.z - this.island.center.z);
-    this.orbit.distance = 62;
+    this.orbit.setDistance(62);
     this.orbit.pitch = 0.6;
 
     this.bombs = []; // landed / flying: { view, body, armedAt }

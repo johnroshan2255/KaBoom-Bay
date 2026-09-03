@@ -28,8 +28,8 @@ Matches last around 2 minutes and nothing persists: every round starts fresh wit
 | Action | Desktop | Touch |
 | --- | --- | --- |
 | Walk | WASD / arrows | Left joystick |
-| Camera | Right-drag / wheel (3rd person), mouse look (1st person) | Two-finger drag (3rd), drag right half (1st) |
-| Switch view | V | 1ST / 3RD button |
+| Camera | Right-drag or Z / C to rotate, wheel or + / − to zoom (3RD and TOP), mouse look (1ST) | Two-finger drag, pinch or + / − buttons (3RD and TOP), drag right half (1ST) |
+| Switch view | V cycles 3RD (default) → TOP → 1ST | VIEW button cycles |
 | Build | Hover + click, R rotate, right-click remove, 1–7 pieces | PLACE / REMOVE / ROT buttons |
 | Throw | Drag back from your bomb (3rd), hold + release (1st) | Hold THROW, release |
 | Grab a landed bomb | Tap it or press E | GRAB |

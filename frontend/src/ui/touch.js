@@ -25,6 +25,8 @@ export class TouchControls {
       #touch button.sec:active { box-shadow:0 1px 0 #0e7fa3; }
       #touch button.rot { background:#ffd23f; box-shadow:0 5px 0 #b58a1a; }
       #touch button[hidden] { display:none; }
+      #touch .zoom { position:absolute; right:calc(12px + env(safe-area-inset-right)); top:158px; display:flex; gap:6px; }
+      #touch .zoom button { width:40px; height:36px; border-radius:0; font-size:12px; background:#0f3446; color:#fff; border:3px solid #f1d48e; box-shadow:0 4px 0 #6d4320; }
       #touch .view { position:absolute; right:calc(12px + env(safe-area-inset-right)); top:110px; width:auto; height:auto; border-radius:0; padding:8px 10px 7px; background:#0f3446; color:#fff; border:3px solid #f1d48e; box-shadow:0 4px 0 #6d4320; font-size:9px; }
     </style>
     <div class="look" data-look></div>
@@ -34,7 +36,8 @@ export class TouchControls {
       <button class="sec" data-sec>GRAB</button>
       <button class="action" data-action>THROW</button>
     </div>
-    <button class="view" data-view>VIEW</button>`;
+    <button class="view" data-view>VIEW</button>
+    <div class="zoom" data-zoom><button data-zin>+</button><button data-zout>-</button></div>`;
     document.body.appendChild(this.el);
 
     const q = (sel) => this.el.querySelector(sel);
@@ -77,6 +80,9 @@ export class TouchControls {
     this.sec.addEventListener("click", () => this.h.onSecondary?.());
     this.rot.addEventListener("click", () => this.h.onRotate?.());
     this.view.addEventListener("click", () => this.h.onView?.());
+    q("[data-zin]").addEventListener("click", () => this.h.onZoom?.(1));
+    q("[data-zout]").addEventListener("click", () => this.h.onZoom?.(-1));
+    this.zoom = q("[data-zoom]");
   }
 
   /** phase: "build" | "combat" | other; mode: "first" | "third" */
@@ -88,7 +94,8 @@ export class TouchControls {
     this.sec.hidden = !(combat || build);
     this.rot.hidden = !build;
     this.look.classList.toggle("on", mode === "first");
-    this.view.textContent = mode === "first" ? "3RD" : "1ST";
+    this.view.textContent = { third: "3RD", top: "TOP", first: "1ST" }[mode] ?? "3RD";
+    this.zoom.style.visibility = mode === "first" ? "hidden" : "visible";
   }
 
   dispose() { this.el.remove(); }

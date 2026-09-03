@@ -11,6 +11,9 @@ export class OrbitCamera {
     this.yaw = Math.PI * 0.25;
     this.pitch = 0.65;
     this.distance = 40;
+    this.targetDistance = 40;
+    this.minPitch = 0.3;
+    this.maxPitch = 1.2;
     this.shake = 0;
     this.enabled = true; // false while the first-person rig drives the camera
     this._shakeOffset = new THREE.Vector3();
@@ -19,6 +22,7 @@ export class OrbitCamera {
 
   update(dt) {
     const { camera, target } = this;
+    this.distance += (this.targetDistance - this.distance) * Math.min(1, dt * 8);
     const cp = Math.cos(this.pitch);
     camera.position.set(
       target.x + Math.sin(this.yaw) * cp * this.distance,
@@ -37,12 +41,18 @@ export class OrbitCamera {
 
   rotate(dYaw, dPitch) {
     this.yaw += dYaw;
-    this.pitch = THREE.MathUtils.clamp(this.pitch + dPitch, 0.3, 1.2);
+    this.pitch = THREE.MathUtils.clamp(this.pitch + dPitch, this.minPitch, this.maxPitch);
   }
 
   zoom(factor) {
-    this.distance = THREE.MathUtils.clamp(this.distance * factor, 25, 200);
+    this.targetDistance = THREE.MathUtils.clamp(this.targetDistance * factor, 22, 200);
   }
+
+  zoomIn() { this.zoom(0.8); }
+  zoomOut() { this.zoom(1.25); }
+
+  /** Jump to a distance without the smoothing (phase changes). */
+  setDistance(d) { this.distance = this.targetDistance = d; }
 
   addShake(amount) {
     this.shake = Math.min(1.5, this.shake + amount);
@@ -96,8 +106,10 @@ export class OrbitCamera {
     };
     const key = (e) => {
       if (!this.enabled || e.target?.tagName === "INPUT") return;
-      if (e.key === "q" || e.key === "ArrowLeft") this.rotate(0.12, 0);
-      if (e.key === "e" || e.key === "ArrowRight") this.rotate(-0.12, 0);
+      if (e.key === "z" || e.key === "Z") this.rotate(0.12, 0);  // E is "grab", so camera rotate lives on Z / C
+      if (e.key === "c" || e.key === "C") this.rotate(-0.12, 0);
+      if (e.key === "+" || e.key === "=") this.zoomIn();
+      if (e.key === "-" || e.key === "_") this.zoomOut();
     };
 
     canvas.addEventListener("pointerdown", down);

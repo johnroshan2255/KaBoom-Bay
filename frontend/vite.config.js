@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  base: "./", // CrazyGames serves the zip from a subfolder: assets must be relative
   server: {
     port: 5173,
     host: true, // expose on LAN for mobile/touch testing

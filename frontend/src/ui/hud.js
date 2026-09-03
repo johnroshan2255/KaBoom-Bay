@@ -43,11 +43,13 @@ function ensure() {
       .hud-cross::before { left:7px; top:0; width:4px; height:18px; } .hud-cross::after { top:7px; left:0; width:18px; height:4px; }
       .hud-charge { position:absolute; left:50%; top:calc(50% + 22px); transform:translateX(-50%); width:120px; height:10px; display:none; padding:0; overflow:hidden; }
       .hud-charge > i { display:block; height:100%; width:0; background:#ff6b3d; }
+      .hud-zoom { position:absolute; right:12px; top:154px; display:flex; gap:6px; }
+      .hud-zoom button { font-family:"Press Start 2P", monospace; font-size:12px; width:36px; height:34px; padding:0; cursor:pointer; pointer-events:auto; color:#fff; }
       .hud-view { position:absolute; right:12px; top:110px; font-family:"Press Start 2P", monospace; font-size:9px; padding:8px 10px 7px; cursor:pointer; pointer-events:auto; color:#fff; }
       @media (max-width: 900px) {
         .hud-pill { font-size:10px; padding:8px 10px 6px; }
         .hud-phase { font-size:9px; padding:8px 10px 6px; } .hud-phase b { font-size:13px; }
-        .hud-sound, .hud-view { display:none; }
+        .hud-sound, .hud-view, .hud-zoom { display:none; }
         .hud-board { bottom:auto; top:52px; gap:3px; } .hud-board div { font-size:7px; min-width:120px; padding:5px 7px; }
         .hud-hint, .hud-hint.with-bar { font-size:10px; padding:5px 8px; max-width:52vw; bottom:auto; top:10px; left:50%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .hud-label { font-size:7px; padding:4px 6px 3px; }
@@ -69,6 +71,7 @@ function ensure() {
     <div class="hud-build hud-panel" data-build></div>
     <button class="hud-sound hud-panel" data-sound>SND ON</button>
     <button class="hud-view hud-panel" data-view>VIEW: 3RD</button>
+    <div class="hud-zoom"><button class="hud-panel" data-zoom-in title="Zoom in (+)">+</button><button class="hud-panel" data-zoom-out title="Zoom out (-)">-</button></div>
     <div class="hud-cross" data-cross></div>
     <div class="hud-charge hud-panel" data-charge><i></i></div>`;
   els = {
@@ -82,6 +85,8 @@ function ensure() {
     build: root().querySelector("[data-build]"),
     sound: root().querySelector("[data-sound]"),
     view: root().querySelector("[data-view]"),
+    zoomIn: root().querySelector("[data-zoom-in]"),
+    zoomOut: root().querySelector("[data-zoom-out]"),
     cross: root().querySelector("[data-cross]"),
     charge: root().querySelector("[data-charge]"),
     chargeBar: root().querySelector("[data-charge] > i"),
@@ -185,10 +190,16 @@ export const hud = {
     if (onToggle) sound.onclick = onToggle;
   },
   setView(mode, onToggle) {
-    const { view, cross } = ensure();
-    view.textContent = mode === "first" ? "VIEW: 1ST" : "VIEW: 3RD";
+    const { view, cross, zoomIn, zoomOut } = ensure();
+    view.textContent = `VIEW: ${{ first: "1ST", top: "TOP", third: "3RD" }[mode] ?? "3RD"}`;
     cross.style.display = mode === "first" ? "block" : "none";
+    zoomIn.parentElement.style.visibility = mode === "first" ? "hidden" : "visible";
     if (onToggle) view.onclick = onToggle;
+  },
+  setZoom(onIn, onOut) {
+    const { zoomIn, zoomOut } = ensure();
+    zoomIn.onclick = onIn;
+    zoomOut.onclick = onOut;
   },
   setCharge(fraction) {
     const { charge, chargeBar } = ensure();

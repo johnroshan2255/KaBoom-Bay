@@ -19,16 +19,24 @@ export class CameraRig {
     canvas.addEventListener("mousemove", (e) => { if (this.mode === "first" && this.locked) this.look(e.movementX, e.movementY); });
   }
 
+  static MODES = ["third", "top", "first"];
+
   setMode(mode, heroYaw = this.yaw) {
     if (mode === this.mode) return;
     this.mode = mode;
-    this.orbit.enabled = mode === "third";
+    this.orbit.enabled = mode !== "first";
     if (mode === "first") { this.yaw = heroYaw; this.pitch = -0.1; }
     else if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
+    if (mode === "top") { this.orbit.minPitch = 1.35; this.orbit.maxPitch = 1.52; this.orbit.pitch = 1.48; }
+    else { this.orbit.minPitch = 0.3; this.orbit.maxPitch = 1.2; if (mode === "third" && this.orbit.pitch > 1.2) this.orbit.pitch = 0.66; }
     this.onModeChange?.(mode);
   }
 
-  toggle(heroYaw) { this.setMode(this.mode === "first" ? "third" : "first", heroYaw); }
+  /** V / VIEW button: 3RD -> TOP -> 1ST -> 3RD */
+  toggle(heroYaw) {
+    const i = CameraRig.MODES.indexOf(this.mode);
+    this.setMode(CameraRig.MODES[(i + 1) % CameraRig.MODES.length], heroYaw);
+  }
 
   requestLock() {
     if (this.mode !== "first" || this.locked) return;

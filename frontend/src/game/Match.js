@@ -88,6 +88,7 @@ export class Match {
     this._focusIsland(this.myIsland);
     hud.setSound(sound.enabled, () => { sound.setEnabled(!sound.enabled); hud.setSound(sound.enabled); sound.play("click"); });
     hud.setView(this.rig.mode, () => this.toggleView());
+    hud.setZoom(() => this.orbit.zoomIn(), () => this.orbit.zoomOut());
     this._onResize = () => this._resize();
     window.addEventListener("resize", this._onResize);
     this._resize();
@@ -234,6 +235,7 @@ export class Match {
         onSecondary: () => (this.phase === MatchPhase.BUILD ? this.build.setMode(this.build.mode === "remove" ? "place" : "remove") : this.tryGrab()),
         onRotate: () => this.build.rotate(),
         onView: () => this.toggleView(),
+        onZoom: (dir) => (dir > 0 ? this.orbit.zoomIn() : this.orbit.zoomOut()),
       });
       this.touch.setContext({ phase: this.phase, mode: this.rig.mode });
     }
@@ -250,7 +252,7 @@ export class Match {
     if (avatar) avatar.group.visible = mode !== "first";
     this.build.centerMode = mode === "first";
     this.build.ghost.count = 0;
-    if (mode === "third") { this._cancelCharge(); if (this.phase === MatchPhase.BUILD) this._buildCamera(); else this._focusIsland(this.myIsland); }
+    if (mode !== "first") { this._cancelCharge(); if (this.phase === MatchPhase.BUILD) this._buildCamera(); else this._focusIsland(this.myIsland); }
     this.touch?.setContext({ phase: this.phase, mode });
     hud.setHint(this._hintFor(this.phase, mode));
   }
@@ -301,7 +303,7 @@ export class Match {
   }
 
   _hintFor(phase, mode) {
-    const move = isTouchDevice() ? "Joystick to walk." : "WASD to walk, V to switch view.";
+    const move = isTouchDevice() ? "Joystick to walk, pinch or +/- to zoom." : "WASD to walk, V cycles 3RD / TOP / 1ST view, wheel or +/- zooms.";
     if (phase === MatchPhase.BUILD) return mode === "first"
       ? `Build: aim with the crosshair, click to place, right-click removes, wheel cycles pieces, R rotates. ${move}`
       : `Build: pick a piece, hover your island and click to place. R rotates, right-click or Remove deletes. ${move}`;
@@ -314,8 +316,8 @@ export class Match {
   _buildCamera() {
     const c = this.islands[this.myIsland].center;
     this.orbit.target.set(c.x, 5, c.z);
-    this.orbit.distance = 58;
-    this.orbit.pitch = 0.78;
+    this.orbit.setDistance(58);
+    if (this.rig.mode !== "top") this.orbit.pitch = 0.78;
   }
 
   // ---------- combat ----------
@@ -380,7 +382,7 @@ export class Match {
   }
 
   _onAimStart(hit) {
-    if (this.phase !== MatchPhase.COMBAT || this.rig.mode !== "third") return false;
+    if (this.phase !== MatchPhase.COMBAT || this.rig.mode === "first") return false;
     const held = this._myHeldBomb();
     if (held && hit.distanceTo(held.target) < 3.5) {
       this.net.send(Message.ARM_BOMB);
@@ -466,7 +468,7 @@ export class Match {
         lobby.hide();
         sound.play("phase");
         cg.gameplayStart();
-        if (this.rig.mode === "third") this._buildCamera();
+        if (this.rig.mode !== "first") this._buildCamera();
         this.build.setEnabled(true);
         hud.setBuildState({ type: this.build.type, mode: this.build.mode, count: this.build.pieceCount, max: this.build.budget });
         document.querySelector("[data-build]").style.display = "flex";
@@ -478,7 +480,7 @@ export class Match {
         sound.play("phase");
         this.build.setEnabled(false);
         hud.hideBuildBar();
-        if (this.rig.mode === "third") this._focusIsland(this.myIsland);
+        if (this.rig.mode !== "first") this._focusIsland(this.myIsland);
         hud.setHint(this._hintFor(phase, this.rig.mode));
         this.touch?.setContext({ phase, mode: this.rig.mode });
         break;
@@ -525,11 +527,17 @@ export class Match {
     this.myIsland = index;
     if (this.build) this.build.island = this.islands[index];
     const c = this.islands[index].center;
-    // Look from behind your island towards the bay centre so all four islands are in frame.
-    this.orbit.target.set(c.x * 0.5, 3, c.z * 0.5);
     this.orbit.yaw = Math.atan2(c.x, c.z);
-    this.orbit.distance = 125;
-    this.orbit.pitch = 0.66;
+    if (this.rig?.mode === "top") {
+      // straight down on your own island; zoom out to see the whole bay
+      this.orbit.target.set(c.x, 3, c.z);
+      this.orbit.setDistance(95);
+    } else {
+      // from behind your island towards the bay centre so all four islands are in frame
+      this.orbit.target.set(c.x * 0.5, 3, c.z * 0.5);
+      this.orbit.setDistance(125);
+      this.orbit.pitch = 0.66;
+    }
   }
 
   // ---------- loop ----------
@@ -568,7 +576,7 @@ export class Match {
     this.clouds.update(dt);
     for (const island of this.islands) island.update(dt, this._time);
     for (const a of this.avatars.values()) a.update(dt, this._time);
-    this.aim.enabled = this.rig.mode === "third" && this.phase === MatchPhase.COMBAT;
+    this.aim.enabled = this.rig.mode !== "first" && this.phase === MatchPhase.COMBAT;
     for (const l of this.lanterns ?? []) l.update(dt, this._time);
     this.water.update(dt);
     this.rig.update(dt, this.hero?.pos);
