@@ -1,0 +1,23 @@
+{
+  "name": "kaboom-bay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "KaBoom Bay - 4-player pixelated-3D island bombing arcade game for CrazyGames",
+  "type": "module",
+  "workspaces": [
+    "shared",
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=backend & npm run dev --workspace=frontend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspace=frontend",
+    "start": "npm run start --workspace=backend",
+    "test": "node --test shared/test/"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="description" content="KaBoom Bay - build your island, bomb your rivals. 4-player tropical arcade chaos." />
+    <link rel="icon" href="data:," />
+    <!-- TODO Phase 9: self-host these two faces in public/assets/fonts to avoid third-party requests on CrazyGames -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
+    <!-- CrazyGames SDK v3; every call is guarded so the game also runs without it -->
+    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
+    <title>KaBoom Bay</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #1ec8e6; touch-action: none; }
+      #game { width: 100%; height: 100%; display: block; }
+      #ui { position: fixed; inset: 0; pointer-events: none; font-family: Nunito, system-ui, sans-serif; }
+      #ui .px { font-family: "Press Start 2P", monospace; }
+      #rotate { display:none; position:fixed; inset:0; z-index:10; background:#0f3446; color:#ffd23f; font-family:"Press Start 2P", monospace; font-size:14px; line-height:2; text-align:center; place-items:center; padding:24px; }
+      @media (orientation: portrait) and (max-width: 900px) { #rotate { display:grid; } }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="ui"></div>
+    <div id="rotate">Rotate your device<br><small style="font-size:9px;color:#a9d6e6">KaBoom Bay plays in landscape</small></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
