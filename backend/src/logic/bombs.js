@@ -1,6 +1,13 @@
 import {
   BOMB_BLAST_RADIUS,
   BOMB_FUSE_MS,
+  BOMB_TYPES,
+  BombType,
+  CLUSTERLET_FUSE_MS,
+  CLUSTERLET_SPEED,
+  GRAVITY,
+  blastKnockback,
+  knockbackLanding,
   BOMB_PAD_OFFSET,
   BOMB_RADIUS,
   BOMB_RESPAWN_MS,
@@ -10,6 +17,7 @@ import {
   Message,
   WATER_LEVEL,
   ISLAND_SIZE,
+  activeIslands,
   bombReturnedBonus,
   canFight,
   clampThrowVelocity,
@@ -19,10 +27,12 @@ import {
   islandOrigin,
   padSpot,
   resolveBlast,
+  sameTeam,
   selfDestructPenalty,
 } from "@kaboom-bay/shared";
 import { BombState } from "../schema/BayState.js";
 import { encodeDiff } from "./islands.js";
+import { groundAt, placeAtSpawn } from "./players.js";
 import { BOMB_PICKUP_RADIUS as PICKUP } from "@kaboom-bay/shared";
 
 /** World position where island `i`'s bomb waits (in front of the hero on the beach). */
@@ -40,17 +50,55 @@ export function heldPosition(player) {
   return { x: player.x + Math.sin(player.yaw) * 0.8, y: player.y + 1.0, z: player.z + Math.cos(player.yaw) * 0.8 };
 }
 
-const holding = (room, sessionId) => [...room.state.bombs.entries()].find(([, b]) => b.holder === sessionId);
+/** [id, bomb] held by `sessionId`, without materialising the whole map every call (runs per player per tick). */
+function holding(room, sessionId) {
+  for (const [id, b] of room.state.bombs.entries()) if (b.holder === sessionId) return [id, b];
+  return undefined;
+}
 
-/** Puts a fresh, unarmed bomb in a player's hands. */
+/** Takes one special bomb of the player's selected type out of their inventory, or falls back to standard. */
+function takeSelectedType(player) {
+  const type = player.selected;
+  if (type && type !== BombType.STANDARD && BOMB_TYPES[type]) {
+    const n = player.bombs.get(type) ?? 0;
+    if (n > 0) {
+      if (n === 1) { player.bombs.delete(type); player.selected = BombType.STANDARD; } else player.bombs.set(type, n - 1);
+      return type;
+    }
+  }
+  player.selected = BombType.STANDARD;
+  return BombType.STANDARD;
+}
+
+/** Puts a fresh, unarmed bomb of the player's selected type in their hands. */
 export function giveBomb(room, sessionId) {
   const player = room.state.players.get(sessionId);
   if (!player || !canFight(room.state.phase) || holding(room, sessionId)) return null;
   const id = `b${room.nextBombId++}`;
   const p = heldPosition(player);
-  room.state.bombs.set(id, new BombState({ owner: player.islandIndex, x: p.x, y: p.y, z: p.z, status: BombStatus.HELD, holder: sessionId, islandIndex: player.islandIndex }));
-  room.bombRecords.set(id, { thrower: null, restSince: 0 });
+  const type = takeSelectedType(player);
+  room.state.bombs.set(id, new BombState({ type, owner: player.islandIndex, x: p.x, y: p.y, z: p.z, status: BombStatus.HELD, holder: sessionId, islandIndex: player.islandIndex }));
+  room.bombRecords.set(id, { thrower: null, restSince: 0, thrownAt: 0 });
   return id;
+}
+
+/**
+ * SELECT_BOMB: choose the type for the next bomb. An unarmed bomb already in hand is swapped to the new
+ * type right away (its previous special type goes back into the inventory).
+ */
+export function selectBomb(room, sessionId, type) {
+  const player = room.state.players.get(sessionId);
+  if (!player || !BOMB_TYPES[type] || type === BombType.CLUSTERLET) return false;
+  if (type !== BombType.STANDARD && !(player.bombs.get(type) > 0)) return false;
+  player.selected = type;
+  const held = holding(room, sessionId);
+  if (held && !held[1].armedAt && held[1].owner === player.islandIndex && held[1].type !== type) {
+    const prev = held[1].type;
+    if (prev !== BombType.STANDARD) player.bombs.set(prev, (player.bombs.get(prev) ?? 0) + 1);
+    held[1].type = takeSelectedType(player);
+    player.selected = held[1].type; // shows what is in hand
+  }
+  return true;
 }
 
 export function armBomb(room, sessionId) {
@@ -72,6 +120,7 @@ export function throwBomb(room, sessionId, msg) {
   const rec = room.bombRecords.get(id);
   rec.thrower = sessionId;
   rec.restSince = 0;
+  rec.thrownAt = Date.now();
   const player = room.state.players.get(sessionId);
   if (player && bomb.owner === player.islandIndex) room.respawnAt.set(sessionId, Date.now() + BOMB_RESPAWN_MS);
   room.broadcast(Message.THROW_BOMB, { id, by: sessionId });
@@ -118,7 +167,13 @@ export function clearBombs(room) {
 /** Per-tick bomb simulation: physics, rest detection, splashes, fuses, respawns. */
 export function stepBombs(room, now, dt) {
   const { state, physics } = room;
-  physics.step(dt, (a, b, point) => room.broadcast(Message.BOMB_CLASH, point));
+  const impacts = new Set();
+  physics.step(dt, (a, b, point) => room.broadcast(Message.BOMB_CLASH, point), (id) => impacts.add(id));
+  for (const id of impacts) {
+    const bomb = state.bombs.get(id), rec = room.bombRecords.get(id);
+    // impact bombs blow on their first touch after leaving the thrower's hands (a short grace so they clear the hero)
+    if (bomb && BOMB_TYPES[bomb.type]?.impact && bomb.status !== BombStatus.HELD && now - (rec?.thrownAt ?? 0) > 250) explode(room, id, bomb, now);
+  }
 
   for (const [id, bomb] of [...state.bombs.entries()]) {
     const rec = room.bombRecords.get(id);
@@ -156,11 +211,19 @@ export function stepBombs(room, now, dt) {
     if (bomb.armedAt && now - bomb.armedAt >= BOMB_FUSE_MS) explode(room, id, bomb, now);
   }
 
+  // Everyone in play always has a bomb coming: empty hands (own bomb thrown, blown up in hand, or an
+  // enemy bomb hurled back) schedule a respawn, and a pending respawn waits while something else is held.
+  for (const [sessionId, p] of state.players) {
+    if (!(p.connected || p.isBot) || room.respawnAt.has(sessionId) || holding(room, sessionId)) continue;
+    room.respawnAt.set(sessionId, now + BOMB_RESPAWN_MS);
+  }
   for (const [sessionId, t] of room.respawnAt) {
     if (now < t) continue;
-    room.respawnAt.delete(sessionId);
     const p = state.players.get(sessionId);
-    if (p && (p.connected || p.isBot)) giveBomb(room, sessionId);
+    if (!p) { room.respawnAt.delete(sessionId); continue; }
+    if (holding(room, sessionId)) continue; // hands full (e.g. grabbed an enemy bomb): keep waiting
+    room.respawnAt.delete(sessionId);
+    if (p.connected || p.isBot) giveBomb(room, sessionId);
   }
 }
 
@@ -171,20 +234,25 @@ function explode(room, id, bomb, now) {
   const wasHeld = bomb.status === BombStatus.HELD;
   const holder = bomb.holder;
   const thrower = rec?.thrower;
+  const type = BOMB_TYPES[bomb.type] ?? BOMB_TYPES[BombType.STANDARD];
+  const radius = type.radius;
+  const owner = bomb.owner;
+  if (state.bombs.get(id) !== bomb) return; // already gone (e.g. impact + fuse in the same tick)
   removeBomb(room, id);
 
   const hitIslands = [];
   const coinsBy = {};
-  const half = ISLAND_SIZE / 2 + BOMB_BLAST_RADIUS;
+  const half = ISLAND_SIZE / 2 + radius;
+  const inPlay = new Set(activeIslands(state.islandCount));
   for (const island of room.islands) {
+    if (!inPlay.has(island.index)) continue;
     const c = islandCenter(island.index);
     if (Math.abs(pos.x - c.x) > half || Math.abs(pos.z - c.z) > half) continue;
     const o = islandOrigin(island.index);
-    const { removed } = resolveBlast(island.grid, pos.x - o.x, pos.y - o.y, pos.z - o.z, BOMB_BLAST_RADIUS);
+    const { removed } = resolveBlast(island.grid, pos.x - o.x, pos.y - o.y, pos.z - o.z, radius);
     if (!removed.length) continue;
     hitIslands.push(island.index);
     for (const { index } of removed) state.terrainDiffs.push(encodeDiff(island.index, index));
-    console.log(`[blast] island ${island.index}: ${removed.length} blocks, ${state.terrainDiffs.length} diffs total`);
     // pieces with no cells left are gone
     for (const [pieceId, cells] of island.pieces) {
       if (cells.every(([x, y, z]) => !island.grid.isSolid(x, y, z))) {
@@ -195,9 +263,9 @@ function explode(room, id, bomb, now) {
     }
     room.physics.rebuildIsland(island.index);
 
-    // attacker earns coins for damage to islands that aren't their own
+    // attacker earns coins for damage to enemy islands (never their own or a teammate's)
     const attacker = thrower && state.players.get(thrower);
-    if (attacker && attacker.islandIndex !== island.index) {
+    if (attacker && !sameTeam(attacker.islandIndex, island.index, state.mode)) {
       const coins = coinsForRemoved(removed);
       attacker.coins += coins;
       coinsBy[thrower] = (coinsBy[thrower] ?? 0) + coins;
@@ -208,14 +276,49 @@ function explode(room, id, bomb, now) {
     const p = state.players.get(holder);
     if (p) { p.coins += selfDestructPenalty(); coinsBy[holder] = (coinsBy[holder] ?? 0) + selfDestructPenalty(); }
   } else if (thrower) {
-    // defender threw someone else's bomb away and it didn't blow up their own island: bonus
+    // defender threw an enemy bomb away and it didn't blow up their own team's islands: bonus
     const t = state.players.get(thrower);
-    if (t && bomb.owner !== t.islandIndex && !hitIslands.includes(t.islandIndex)) {
+    if (t && !sameTeam(bomb.owner, t.islandIndex, state.mode) && !hitIslands.some((i) => sameTeam(i, t.islandIndex, state.mode))) {
       t.coins += bombReturnedBonus();
       coinsBy[thrower] = (coinsBy[thrower] ?? 0) + bombReturnedBonus();
     }
   }
 
-  room.physics.applyBlastImpulse(pos, BOMB_BLAST_RADIUS, 40);
-  room.broadcast(Message.BOMB_EXPLODED, { ...pos, radius: BOMB_BLAST_RADIUS, islands: hitIslands, coinsBy });
+  room.physics.applyBlastImpulse(pos, radius, 40);
+  knockHeroes(room, pos, radius, now);
+  room.broadcast(Message.BOMB_EXPLODED, { ...pos, radius, type: bomb.type, islands: hitIslands, coinsBy });
+
+  // cluster bombs split into bomblets that pop a moment later
+  if (type.cluster > 0) {
+    for (let i = 0; i < type.cluster; i++) {
+      const a = (i / type.cluster) * Math.PI * 2 + Math.random() * 0.6;
+      const cid = `b${room.nextBombId++}`;
+      const start = { x: pos.x + Math.cos(a) * 0.6, y: pos.y + 0.8, z: pos.z + Math.sin(a) * 0.6 };
+      state.bombs.set(cid, new BombState({ type: BombType.CLUSTERLET, owner, x: start.x, y: start.y, z: start.z, status: BombStatus.FLYING, armedAt: now - (BOMB_FUSE_MS - CLUSTERLET_FUSE_MS) }));
+      room.bombRecords.set(cid, { thrower, restSince: 0, thrownAt: now });
+      room.physics.spawnBomb(cid, start, { vx: Math.cos(a) * CLUSTERLET_SPEED, vy: 6 + Math.random() * 3, vz: Math.sin(a) * CLUSTERLET_SPEED });
+    }
+  }
+}
+
+/**
+ * Heroes near the blast are thrown. Humans animate their own flight client-side (they own their MOVE
+ * stream) and report a fall with HERO_RESPAWN; here we record the knock so big MOVE steps are accepted,
+ * and move bots (and disconnected players) straight to where they would land, or back to their spawn
+ * if that is in the water.
+ */
+function knockHeroes(room, pos, radius, now) {
+  for (const [key, p] of room.state.players) {
+    const v = blastKnockback(p, pos, radius);
+    if (!v) continue;
+    room.knockedAt.set(key, now);
+    if (p.isBot || !p.connected) {
+      const land = knockbackLanding(p, v, GRAVITY);
+      const y = groundAt(room, p.islandIndex, land.x, land.z);
+      if (y === null) {
+        room.broadcast(Message.HERO_FELL, { by: key, x: land.x, z: land.z });
+        placeAtSpawn(room, p);
+      } else { p.x = land.x; p.z = land.z; p.y = y; }
+    }
+  }
 }

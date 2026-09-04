@@ -70,9 +70,8 @@ export class BuildController {
     if (!this.enabled || e.target?.tagName === "INPUT") return;
     const n = Number(e.key);
     if (n >= 1 && n <= PIECE_TYPES.length) this.setType(PIECE_TYPES[n - 1]);
-    else if (e.key === "r" || e.key === "R") this.rotate();
-    else if (e.key === "x" || e.key === "X") this.setMode(this.mode === "remove" ? "place" : "remove");
-    else if (e.key === "Escape") this.setMode("place");
+    else if (e.code === "KeyR") this.rotate();
+    else if (e.code === "KeyX") this.setMode(this.mode === "remove" ? "place" : "remove"); // Escape is not used: browsers reserve it for fullscreen exit
   }
 
   _onDown(e) {
@@ -116,6 +115,21 @@ export class BuildController {
   updateCenter() {
     if (!this.enabled) return;
     this._hoverAt(0, 0, this.mode === "remove");
+  }
+
+  /**
+   * Touch: hover the screen centre, and if that spot can't take the piece (a tree, a wall, water), try a
+   * ring of nearby points so PLACE lands on the closest valid ground instead of doing nothing.
+   */
+  updateCenterNear() {
+    if (!this.enabled) return;
+    const isRemove = this.mode === "remove";
+    const offsets = [[0, 0], [0.08, 0], [-0.08, 0], [0, 0.08], [0, -0.08], [0.08, 0.08], [-0.08, 0.08], [0.08, -0.08], [-0.08, -0.08], [0.16, 0], [-0.16, 0], [0, 0.16], [0, -0.16], [0.16, 0.16], [-0.16, 0.16], [0.16, -0.16], [-0.16, -0.16]];
+    for (const [dx, dy] of offsets) {
+      this._hoverAt(dx, dy, isRemove);
+      if (isRemove ? this.hover?.removeId : this.hover?.ok) return;
+    }
+    this._hoverAt(0, 0, isRemove); // nothing valid nearby: show the red ghost at the centre
   }
 
   /** First person: act on the current crosshair hover. */

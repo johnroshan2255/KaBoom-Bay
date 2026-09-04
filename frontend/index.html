@@ -5,17 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="description" content="KaBoom Bay - build your island, bomb your rivals. 4-player tropical arcade chaos." />
     <link rel="icon" href="data:," />
-    <!-- TODO Phase 9: self-host these two faces in public/assets/fonts to avoid third-party requests on CrazyGames -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Nunito:wght@600;700;800&display=swap" rel="stylesheet" />
+    <!-- Fonts are self-hosted (OFL licensed): the only third-party request the game makes is the CrazyGames SDK. -->
     <!-- CrazyGames SDK v3; every call is guarded so the game also runs without it -->
     <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
     <title>KaBoom Bay</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #1ec8e6; touch-action: none; }
+      @font-face { font-family: "Press Start 2P"; font-style: normal; font-weight: 400; font-display: swap; src: url("assets/fonts/PressStart2P.woff2") format("woff2"); }
+      @font-face { font-family: "Nunito"; font-style: normal; font-weight: 600 800; font-display: swap; src: url("assets/fonts/Nunito.woff2") format("woff2"); }
+      /* user-select / touch-callout off: CrazyGames mobile requirement (no text selection or magnifier on long press) */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #1ec8e6; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      input, textarea { user-select: text; -webkit-user-select: text; }
       #game { width: 100%; height: 100%; display: block; }
-      #ui { position: fixed; inset: 0; pointer-events: none; font-family: Nunito, system-ui, sans-serif; }
+      /* HUD above the touch controls layer (z 1) so its buttons win over the first-person look zone */
+      #ui { position: fixed; inset: 0; z-index: 2; pointer-events: none; font-family: Nunito, system-ui, sans-serif; }
       #ui .px { font-family: "Press Start 2P", monospace; }
       #rotate { display:none; position:fixed; inset:0; z-index:10; background:#0f3446; color:#ffd23f; font-family:"Press Start 2P", monospace; font-size:14px; line-height:2; text-align:center; place-items:center; padding:24px; }
       @media (orientation: portrait) and (max-width: 900px) { #rotate { display:grid; } }

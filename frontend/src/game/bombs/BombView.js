@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BOMB_FUSE_MS, BOMB_RADIUS } from "@kaboom-bay/shared";
+import { BOMB_FUSE_MS, BOMB_RADIUS, BOMB_TYPES, BombType } from "@kaboom-bay/shared";
 
 const bodyGeo = new THREE.SphereGeometry(BOMB_RADIUS, 10, 8);
 const fuseGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.35, 5);
@@ -8,6 +8,7 @@ const sparkGeo = new THREE.OctahedronGeometry(0.11);
 const GREEN = new THREE.Color(0x5df26a);
 const YELLOW = new THREE.Color(0xffd23f);
 const RED = new THREE.Color(0xff4b3e);
+const RING_SEGMENTS = 32;
 
 /**
  * Visual for one bomb: chunky black sphere, fuse with a spark, and a camera-facing
@@ -17,6 +18,7 @@ export class BombView {
   constructor(scene) {
     this.scene = scene;
     this.group = new THREE.Group();
+    this.group.name = "bomb";
 
     this.body = new THREE.Mesh(bodyGeo, new THREE.MeshLambertMaterial({ color: 0x23272f, flatShading: true }));
     this.body.castShadow = true;
@@ -35,13 +37,22 @@ export class BombView {
     this.body.add(this.spark);
 
     this.ringMat = new THREE.MeshBasicMaterial({ color: GREEN, side: THREE.DoubleSide, transparent: true, opacity: 0.9, depthTest: false });
-    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.85, 32), this.ringMat);
+    this.ring = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.85, RING_SEGMENTS, 1, Math.PI / 2), this.ringMat);
     this.ring.renderOrder = 10;
     this.ring.visible = false;
     this.group.add(this.ring);
     this._ringFraction = -1;
 
     scene.add(this.group);
+  }
+
+  /** Colour and size for a BombType (mega is big and red, cluster green, impact amber, bomblets small). */
+  setType(type) {
+    const def = BOMB_TYPES[type] ?? BOMB_TYPES[BombType.STANDARD];
+    this.type = type;
+    this.baseColor = def.color;
+    this.body.material.color.setHex(def.color);
+    this.body.scale.setScalar(def.scale);
   }
 
   setPosition(p) {
@@ -57,7 +68,7 @@ export class BombView {
     if (fraction === null) {
       this.ring.visible = false;
       this.spark.visible = false;
-      this.body.material.color.setHex(0x23272f);
+      this.body.material.color.setHex(this.baseColor ?? 0x23272f);
       return;
     }
     this.ring.visible = true;
@@ -65,9 +76,9 @@ export class BombView {
     this.spark.scale.setScalar(0.8 + 0.5 * Math.abs(Math.sin(timeSec * 25)));
 
     if (Math.abs(fraction - this._ringFraction) > 0.02) {
-      this.ring.geometry.dispose();
-      this.ring.geometry = new THREE.RingGeometry(0.7, 0.85, 32, 1, Math.PI / 2, Math.max(0.01, fraction) * Math.PI * 2);
+      // RingGeometry indices run along the arc, so a draw range shortens the ring without rebuilding it.
       this._ringFraction = fraction;
+      this.ring.geometry.setDrawRange(0, Math.max(1, Math.round(fraction * RING_SEGMENTS)) * 6);
     }
     this.ringMat.color.copy(fraction > 0.5 ? GREEN : YELLOW).lerp(fraction > 0.5 ? YELLOW : RED, fraction > 0.5 ? (1 - fraction) * 2 : 1 - fraction * 2);
     this.ring.quaternion.copy(camera.quaternion);
@@ -77,9 +88,9 @@ export class BombView {
     const remainingMs = fraction * BOMB_FUSE_MS;
     if (remainingMs < 3000) {
       const pulse = 0.5 + 0.5 * Math.sin(timeSec * (remainingMs < 1000 ? 40 : 18));
-      this.body.material.color.setHex(0x23272f).lerp(RED, pulse * 0.8);
+      this.body.material.color.setHex(this.baseColor ?? 0x23272f).lerp(RED, pulse * 0.8);
     } else {
-      this.body.material.color.setHex(0x23272f);
+      this.body.material.color.setHex(this.baseColor ?? 0x23272f);
     }
   }
 

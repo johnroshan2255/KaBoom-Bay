@@ -25,10 +25,14 @@ export class AimController {
     this.pull = new THREE.Vector3();
     this.enabled = true;
 
-    canvas.addEventListener("pointerdown", (e) => this._down(e));
-    canvas.addEventListener("pointermove", (e) => this._move(e));
-    canvas.addEventListener("pointerup", (e) => this._up(e));
-    canvas.addEventListener("pointercancel", () => this._cancel());
+    this._handlers = { pointerdown: (e) => this._down(e), pointermove: (e) => this._move(e), pointerup: (e) => this._up(e), pointercancel: () => this._cancel() };
+    for (const [type, fn] of Object.entries(this._handlers)) canvas.addEventListener(type, fn);
+  }
+
+  dispose() {
+    this._cancel();
+    this.enabled = false;
+    for (const [type, fn] of Object.entries(this._handlers)) this.canvas.removeEventListener(type, fn);
   }
 
   /** The world point the slingshot pulls back from. */
@@ -56,7 +60,7 @@ export class AimController {
     if (this.cb.onStart && this.cb.onStart(_hit.clone(), e) === false) return;
     this.pointerId = e.pointerId;
     this.start.copy(_hit);
-    this.canvas.setPointerCapture?.(e.pointerId);
+    try { this.canvas.setPointerCapture?.(e.pointerId); } catch { /* synthetic event without an active pointer */ }
   }
 
   _move(e) {

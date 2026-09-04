@@ -7,16 +7,43 @@
 // ---------- Multiplayer ----------
 export const ROOM_NAME = "kaboom_bay";
 export const MAX_PLAYERS = 4;
-export const MIN_PLAYERS_TO_START = 2;
+export const MIN_PLAYERS_TO_START = 2;           // humans needed for the automatic countdown; fewer can START_NOW with bots
+
+/** Free-for-all: every island for itself. Teams: islands 0+1 (north row) vs 2+3 (south row). */
+export const GameMode = Object.freeze({ FFA: "ffa", TEAMS: "teams" });
+export const DEFAULT_GAME_MODE = GameMode.FFA;
+export const TEAM_SIZE = 2;
+export const TEAM_COUNT = MAX_PLAYERS / TEAM_SIZE;
 export const SERVER_TICK_RATE = 20;              // simulation ticks per second
 export const SERVER_TICK_MS = 1000 / SERVER_TICK_RATE;
 
 // ---------- Match flow (milliseconds) ----------
-export const BUILD_PHASE_DURATION = 30_000;      // free-form building on your island
-export const COMBAT_PHASE_DURATION = 90_000;     // bombing opponents' islands
-export const MATCH_DURATION = BUILD_PHASE_DURATION + COMBAT_PHASE_DURATION; // ~2 minutes
+// The host picks the match length in the lobby (MIN..MAX minutes); a quarter of it is the build phase.
+export const MIN_MATCH_MINUTES = 3;
+export const MAX_MATCH_MINUTES = 16;
+export const DEFAULT_MATCH_MINUTES = 3;
+export const BUILD_FRACTION = 0.25;
+export const BUILD_PHASE_DURATION = 45_000;      // build phase at the default 3-minute length
+export const COMBAT_PHASE_DURATION = 135_000;    // combat at the default 3-minute length
+export const MATCH_DURATION = BUILD_PHASE_DURATION + COMBAT_PHASE_DURATION;
+/** Build / combat lengths for a match of `minutes` (clamped to the allowed range). */
+export function matchDurations(minutes) {
+  const m = Math.min(MAX_MATCH_MINUTES, Math.max(MIN_MATCH_MINUTES, Math.round(Number(minutes) || DEFAULT_MATCH_MINUTES)));
+  const total = m * 60_000;
+  const buildMs = Math.round(total * BUILD_FRACTION);
+  return { minutes: m, buildMs, combatMs: total - buildMs };
+}
+
+// ---------- Room size ----------
+// A room only uses as many islands as there are participants (humans + bots the host asked for).
+export const MAX_BOTS = 3;
+export const DEFAULT_BOTS = 3;
+/** Island indices in play for `count` participants, chosen so the bay stays balanced around its centre. */
+const ISLAND_SETS = Object.freeze({ 1: [0], 2: [0, 3], 3: [0, 1, 3], 4: [0, 1, 2, 3] });
+export const activeIslands = (count) => ISLAND_SETS[Math.min(4, Math.max(1, count | 0))];
 export const RESULTS_DURATION = 8_000;           // scoreboard before the room closes
 export const LOBBY_COUNTDOWN = 5_000;            // wait after enough players join
+export const LOBBY_SOLO_WAIT = 6_000;            // public lobby: alone this long -> countdown starts anyway (bots fill), so Play is one click to gameplay
 
 export const MatchPhase = Object.freeze({
   LOBBY: "lobby",
@@ -40,6 +67,32 @@ export const BOMB_REST_TIME_MS = 300;            // must stay slow this long to 
 export const BOMB_PAD_OFFSET = 1.1;              // bomb waits this far in front of the hero
 
 export const BombStatus = Object.freeze({ HELD: "held", FLYING: "flying", RESTING: "resting" });
+
+// ---------- Bomb types & supply drops ----------
+export const BombType = Object.freeze({ STANDARD: "standard", MEGA: "mega", CLUSTER: "cluster", IMPACT: "impact", CLUSTERLET: "clusterlet" });
+/** Per-type tuning. `radius` is the blast radius; `impact` bombs explode on their first landing instead of by fuse. */
+export const BOMB_TYPES = Object.freeze({
+  [BombType.STANDARD]:   { name: "Bomb",    key: "1", radius: BOMB_BLAST_RADIUS,       scale: 1,    color: 0x23272f, impact: false, cluster: 0, drop: false },
+  [BombType.MEGA]:       { name: "Mega",    key: "2", radius: BOMB_BLAST_RADIUS * 1.6, scale: 1.35, color: 0xb42a2a, impact: false, cluster: 0, drop: true },
+  [BombType.CLUSTER]:    { name: "Cluster", key: "3", radius: BOMB_BLAST_RADIUS * 0.8, scale: 1.05, color: 0x2f8f4a, impact: false, cluster: 4, drop: true },
+  [BombType.IMPACT]:     { name: "Impact",  key: "4", radius: BOMB_BLAST_RADIUS * 1.1, scale: 1,    color: 0xe0a020, impact: true,  cluster: 0, drop: true },
+  [BombType.CLUSTERLET]: { name: "Bomblet", key: "",  radius: BOMB_BLAST_RADIUS * 0.65, scale: 0.6, color: 0x2f8f4a, impact: false, cluster: 0, drop: false },
+});
+/** Types that supply crates can carry (players start every match with only standard bombs). */
+export const DROP_TYPES = Object.freeze([BombType.MEGA, BombType.CLUSTER, BombType.IMPACT]);
+export const SUPPLY_DROP_INTERVAL_MS = 9_000;    // one crate lands somewhere in the bay this often during combat
+export const SUPPLY_DROP_FALL_MS = 2_200;        // crate falls from the sky for this long before it can be picked up
+export const SUPPLY_DROP_LIFETIME_MS = 25_000;   // unclaimed crates sink back into the sand
+export const CRATE_PICKUP_RADIUS = 2.2;          // hero must be this close to collect a crate
+export const CLUSTERLET_FUSE_MS = 1_200;         // bomblets pop shortly after the cluster bomb splits
+export const CLUSTERLET_SPEED = 9;               // launch speed of bomblets
+
+// ---------- Blast knockback ----------
+export const KNOCKBACK_RADIUS_SCALE = 1.7;       // heroes within blastRadius * this are thrown
+export const KNOCKBACK_SPEED = 12;               // horizontal launch speed at the blast centre
+export const KNOCKBACK_LIFT = 7;                 // vertical launch speed
+export const KNOCKBACK_MOVE_GRACE_MS = 2_000;    // server accepts big MOVE steps this long after a knockback
+export const HERO_RESPAWN_COOLDOWN_MS = 500;     // min gap between fall respawns (abuse guard; a double knock can sink you twice quickly)
 
 // ---------- Hero ----------
 export const HERO_SPEED = 5.5;                   // walk speed, world units per second
@@ -92,7 +145,15 @@ export const Message = Object.freeze({
   GRAB_BOMB: "grab_bomb",                        // client -> server: bomb id resting on my island
   BOMB_SPLASH: "bomb_splash",                    // server -> clients: { x, y, z }
   BOMB_CLASH: "bomb_clash",                      // server -> clients: two bombs hit each other { x, y, z }
+  PICK_CRATE: "pick_crate",                      // client -> server: crate id (must be landed, on my island, within CRATE_PICKUP_RADIUS)
+  SELECT_BOMB: "select_bomb",                    // client -> server: BombType to use for the next bomb (swaps an unarmed held bomb)
+  HERO_RESPAWN: "hero_respawn",                  // client -> server: I fell off my island; server -> client: { x, y, z, yaw } to teleport to
+  HERO_FELL: "hero_fell",                        // server -> clients: { by, x, z } splash where a hero hit the water
+  SUPPLY_DROP: "supply_drop",                    // server -> clients: { id, islandIndex } a crate is falling
+  LOBBY_SETTINGS: "lobby_settings",              // host -> server (lobby): { bots?, minutes? }
   PLAYER_READY: "player_ready",
+  START_NOW: "start_now",                        // client -> server (lobby): begin now, bots fill the empty islands
+  SWITCH_TEAM: "switch_team",                    // client -> server (lobby, teams mode): { team } to join, default: the other team
   PHASE_CHANGED: "phase_changed",
   BOMB_EXPLODED: "bomb_exploded",
   MATCH_RESULTS: "match_results",
@@ -101,6 +162,8 @@ export const Message = Object.freeze({
 // ---------- Players / layout ----------
 export const PLAYER_COLORS = Object.freeze([0xff5c5c, 0x4da3ff, 0xffd23f, 0x62d26f]); // island 0..3
 export const PLAYER_COLOR_NAMES = Object.freeze(["Red", "Blue", "Yellow", "Green"]);
+export const TEAM_COLORS = Object.freeze([0xff5c5c, 0x4da3ff]); // team 0 (north), team 1 (south)
+export const TEAM_NAMES = Object.freeze(["Red Team", "Blue Team"]);
 
 /** World-space centre of island `index` in the 2x2 layout. */
 export function islandCenter(index) {

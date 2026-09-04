@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { generateIsland, resolveBlast, Block } from "@kaboom-bay/shared";
 import { VoxelMesher } from "../rendering/VoxelMesher.js";
 import { MistRing } from "../rendering/Mist.js";
+import { Waterfall } from "../rendering/Waterfall.js";
+import { quality } from "../rendering/quality.js";
 
 /**
  * One player's island: voxel grid + world placement + mesh.
@@ -12,21 +14,32 @@ export class Island {
     this.index = index;
     const gen = generateIsland({ seed });
     this.grid = gen.grid;
-    this.palms = gen.palms;
+    this.palms = gen.palms; // every trunk / prop base (spawn pad avoidance)
+    this.decor = gen.decor;
     this.center = center.clone();
     this.origin = new THREE.Vector3(center.x - this.grid.sizeX / 2, 0, center.z - this.grid.sizeZ / 2);
     this.mesher = new VoxelMesher(scene, this.origin);
-    this.mesher.rebuild(this.grid);
+    this.mesher.rebuild(this.grid, this.decor);
     this.mist = new MistRing(scene, this.center, this.grid.sizeX / 2 - 1, { seed: seed * 7 + 3 });
+    this.waterfall = gen.waterfall && quality.settings.waterfall ? new Waterfall(scene, { origin: this.origin, spot: gen.waterfall }) : null;
+    this._unsubscribe = quality.onChange(() => this.mesher.rebuild(this.grid, this.decor)); // decal budget changed
+  }
+
+  /** Re-mesh after terrain or building changes (keeps the flower decals that survived). */
+  rebuild() {
+    this.mesher.rebuild(this.grid, this.decor);
   }
 
   update(dt, time) {
     this.mist.update(dt, time);
+    this.waterfall?.update(dt, time);
   }
 
   dispose() {
+    this._unsubscribe();
     this.mesher.dispose();
     this.mist.dispose();
+    this.waterfall?.dispose();
   }
 
   /** Beach spot whose nearest palm is furthest away - where the player stands and throws from. */
@@ -75,7 +88,7 @@ export class Island {
   blast(worldPos, radius) {
     const g = this.worldToGrid(worldPos);
     const result = resolveBlast(this.grid, g.x, g.y, g.z, radius);
-    if (result.removed.length) this.mesher.rebuild(this.grid);
+    if (result.removed.length) this.rebuild();
     return result;
   }
 }

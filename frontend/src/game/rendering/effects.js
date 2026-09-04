@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GRAVITY, WATER_LEVEL } from "@kaboom-bay/shared";
 import { blockColor } from "./palette.js";
+import { quality } from "./quality.js";
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -45,19 +46,64 @@ export class Effects {
     this.emberMesh.frustumCulled = false;
     this.emberMesh.count = 0;
     scene.add(this.emberMesh);
+    // Per-instance colour buffers exist from the start: they change the shader variant, and creating
+    // them lazily on the first blast would compile a second program mid-match.
+    const white = new THREE.Color(0xffffff);
+    this.debrisMesh.setColorAt(0, white);
+    this.emberMesh.setColorAt(0, white);
 
     this.fireballs = [];
     this.rings = [];
-    this.flashes = [];
     this.ringGeometry = new THREE.RingGeometry(0.75, 1, 40);
+
+    // One persistent flash light, reused by every explosion. three.js bakes the number of *visible*
+    // lights into every lit shader, so the light stays visible at intensity 0 when idle: a constant light
+    // count means the shaders compile once. The lowest tier leaves the light out of the scene entirely.
+    this.flash = new THREE.PointLight(0xffb060, 0, 30, 2);
+    this.flashLife = 0;
+    if (quality.settings.explosionLight) scene.add(this.flash);
+    this._unsubscribe = quality.onChange(() => { if (!quality.settings.explosionLight) { this.scene.remove(this.flash); this.flash.intensity = 0; } });
+  }
+
+  /**
+   * Compiles every effect shader once up front so the first explosion doesn't stall the frame.
+   * three.js frees a shader program when the last material using it is disposed, so one hidden "anchor"
+   * mesh per material variant stays in the scene for the effect's lifetime: puffs come and go, the
+   * programs stay resident. `extra` objects (bomb views, aim preview) are compiled and hidden the same way.
+   */
+  prewarm(renderer, camera, extra = []) {
+    const far = new THREE.Vector3(0, -50, 0);
+    this.anchors = new THREE.Group();
+    this.anchors.position.copy(far);
+    this.anchors.scale.setScalar(0.001);
+    for (const m of [
+      new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, flatShading: true }), // smoke
+      new THREE.MeshBasicMaterial({ color: 0xffe14a, transparent: true, opacity: 1, toneMapped: false }), // fireball
+      new THREE.MeshBasicMaterial({ color: 0xfffbe6, toneMapped: false }), // fireball core
+      new THREE.MeshBasicMaterial({ color: 0xfff6d0, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }), // shockwave ring
+    ]) this.anchors.add(new THREE.Mesh(this.puffGeometry, m));
+    this.scene.add(this.anchors);
+    for (const o of extra) this.scene.add(o);
+    this.burstCell(far, 1); // one debris cube so the instanced debris (and its shadow variant) compiles now
+    renderer.compile(this.scene, camera);
+    // compile() skips the shadow pass; one real frame compiles the depth variants of every caster too
+    for (const o of [this.anchors, ...extra]) o.traverse((m) => { if (m.isMesh) m.castShadow = true; });
+    renderer.render(this.scene, camera);
+    this.anchors.visible = false;
+    for (const o of extra) o.visible = false;
+  }
+
+  _flash(center, intensity, distance, life) {
+    if (!quality.settings.explosionLight || !this.flash.parent) return;
+    this.flash.position.copy(center).add(new THREE.Vector3(0, 1.5, 0));
+    this.flash.intensity = intensity;
+    this.flash.distance = distance;
+    this.flashLife = life;
   }
 
   /** Cartoon blast: flash, fireball, embers, shockwave ring, dark smoke turning grey. */
   explosion(center, radius = 3) {
-    const light = new THREE.PointLight(0xffb060, 70, radius * 8, 2);
-    light.position.copy(center).add(new THREE.Vector3(0, 1.5, 0));
-    this.scene.add(light);
-    this.flashes.push({ light, age: 0, life: 0.35 });
+    this._flash(center, 70, radius * 8, 0.35);
 
     const ball = new THREE.Mesh(this.puffGeometry, new THREE.MeshBasicMaterial({ color: 0xffe14a, transparent: true, opacity: 1, toneMapped: false }));
     ball.position.copy(center).add(new THREE.Vector3(0, 0.6, 0));
@@ -75,7 +121,7 @@ export class Effects {
     this.scene.add(ring);
     this.rings.push({ mesh: ring, age: 0, life: 0.5, radius });
 
-    for (let i = 0; i < 34; i++) {
+    for (let i = 0; i < quality.settings.embers; i++) {
       if (this.embers.length >= this.maxEmbers) break;
       const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
       const speed = 5 + Math.random() * 9;
@@ -89,8 +135,9 @@ export class Effects {
     }
 
     // dark smoke first, lighter puffs rising behind it
-    this.smoke(center.clone().add(new THREE.Vector3(0, 0.8, 0)), radius * 0.9, 8, 0x3f3f47, { rise: 5, life: 1.5, delay: 0.05 });
-    this.smoke(center.clone().add(new THREE.Vector3(0, 1.6, 0)), radius * 1.1, 8, 0x9a9aa6, { rise: 3.5, life: 1.9, delay: 0.25 });
+    const k = quality.settings.smokeScale;
+    this.smoke(center.clone().add(new THREE.Vector3(0, 0.8, 0)), radius * 0.9, Math.max(2, Math.round(8 * k)), 0x3f3f47, { rise: 5, life: 1.5, delay: 0.05 });
+    this.smoke(center.clone().add(new THREE.Vector3(0, 1.6, 0)), radius * 1.1, Math.max(2, Math.round(8 * k)), 0x9a9aa6, { rise: 3.5, life: 1.9, delay: 0.25 });
   }
 
   /** Two bombs hit in mid-air: short bright spray. */
@@ -100,10 +147,7 @@ export class Effects {
       const dir = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.2, Math.random() - 0.5).normalize();
       this.embers.push({ pos: center.clone(), vel: dir.multiplyScalar(4 + Math.random() * 6), age: 0, life: 0.35 + Math.random() * 0.3, color: new THREE.Color(i % 3 ? 0xfff6c0 : 0xffd23f) });
     }
-    const light = new THREE.PointLight(0xfff0c0, 25, 10, 2);
-    light.position.copy(center);
-    this.scene.add(light);
-    this.flashes.push({ light, age: 0, life: 0.2 });
+    this._flash(center, 25, 10, 0.2);
   }
 
   /** One tumbling cube for a single destroyed voxel (online matches learn about damage cell by cell). */
@@ -144,6 +188,17 @@ export class Effects {
     }
   }
 
+  dispose() {
+    this._unsubscribe();
+    for (const f of this.fireballs) { this.scene.remove(f.mesh); f.mesh.material.dispose(); }
+    for (const r of this.rings) { this.scene.remove(r.mesh); r.mesh.material.dispose(); }
+    for (const p of this.puffs) { this.scene.remove(p.mesh); p.mesh.material.dispose(); }
+    this.scene.remove(this.debrisMesh, this.emberMesh, this.flash);
+    if (this.anchors) { this.scene.remove(this.anchors); for (const m of this.anchors.children) m.material.dispose(); }
+    this.debrisMesh.dispose(); this.emberMesh.dispose();
+    this.puffGeometry.dispose(); this.ringGeometry.dispose();
+  }
+
   smoke(center, radius, count = 9, color = 0xf4f4f4, { rise = 2, life = 1.1, delay = 0 } = {}) {
     for (let i = 0; i < count; i++) {
       const mesh = new THREE.Mesh(
@@ -169,7 +224,7 @@ export class Effects {
   splash(position) {
     const p = position.clone();
     p.y = WATER_LEVEL;
-    this.smoke(p, 1.6, 6, 0xcdf3ff);
+    this.smoke(p, 1.6, Math.max(2, Math.round(6 * quality.settings.smokeScale)), 0xcdf3ff);
   }
 
   update(dt) {
@@ -243,12 +298,11 @@ export class Effects {
       r.mesh.material.opacity = 0.8 * (1 - t);
     }
 
-    // flashes
-    for (let i = this.flashes.length - 1; i >= 0; i--) {
-      const f = this.flashes[i];
-      f.age += dt;
-      if (f.age >= f.life) { this.scene.remove(f.light); this.flashes.splice(i, 1); continue; }
-      f.light.intensity *= Math.exp(-dt * 12);
+    // flash light
+    if (this.flashLife > 0) {
+      this.flashLife -= dt;
+      this.flash.intensity *= Math.exp(-dt * 12);
+      if (this.flashLife <= 0) this.flash.intensity = 0;
     }
 
     // smoke

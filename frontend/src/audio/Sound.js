@@ -9,9 +9,25 @@ class Sound {
     this.master = null;
     this.enabled = this._load();
     this.ambient = null;
+    this.portalMuted = false; // CrazyGames settings.muteAudio overrides the player's own toggle
     this._unlock = () => this.unlock();
     window.addEventListener("pointerdown", this._unlock, { once: true });
     window.addEventListener("keydown", this._unlock, { once: true });
+    // iOS suspends / interrupts the context (phone call, background, ad): resume on the next gesture
+    const resume = () => { if (this.ctx && this.ctx.state !== "running") this.ctx.resume?.().catch?.(() => {}); };
+    window.addEventListener("pointerdown", resume);
+    window.addEventListener("keydown", resume);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) resume(); });
+  }
+
+  /** Portal-level mute (CrazyGames settings). Wins over setEnabled(). */
+  setPortalMuted(muted) {
+    this.portalMuted = !!muted;
+    this._applyGain();
+  }
+
+  _applyGain() {
+    if (this.master) this.master.gain.setTargetAtTime(this.enabled && !this.portalMuted ? 0.8 : 0, this.ctx.currentTime, 0.05);
   }
 
   _load() {
@@ -24,20 +40,20 @@ class Sound {
     if (!Ctx) return;
     this.ctx = new Ctx();
     this.master = this.ctx.createGain();
-    this.master.gain.value = this.enabled ? 0.8 : 0;
+    this.master.gain.value = this.enabled && !this.portalMuted ? 0.8 : 0;
     this.master.connect(this.ctx.destination);
     this._startAmbient();
   }
 
   /** Silence during ads without changing the player's preference. */
   duck(on) {
-    if (this.master) this.master.gain.setTargetAtTime(on ? 0 : (this.enabled ? 0.8 : 0), this.ctx.currentTime, 0.05);
+    if (this.master) this.master.gain.setTargetAtTime(on || this.portalMuted || !this.enabled ? 0 : 0.8, this.ctx.currentTime, 0.05);
   }
 
   setEnabled(on) {
     this.enabled = on;
     try { localStorage.setItem("kaboom.sound", on ? "on" : "off"); } catch { /* private mode */ }
-    if (this.master) this.master.gain.setTargetAtTime(on ? 0.8 : 0, this.ctx.currentTime, 0.05);
+    this._applyGain();
   }
 
   // ---------- building blocks ----------

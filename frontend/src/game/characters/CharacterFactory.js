@@ -136,18 +136,41 @@ export function buildLanternVoxels() {
   return v;
 }
 
+let glowMaterial = null;
+function lanternGlow() {
+  if (glowMaterial) return glowMaterial;
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const ctx = c.getContext("2d");
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  g.addColorStop(0, "rgba(255,225,120,0.9)");
+  g.addColorStop(0.4, "rgba(255,193,74,0.35)");
+  g.addColorStop(1, "rgba(255,193,74,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  glowMaterial = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+  return glowMaterial;
+}
+
+/**
+ * Small voxel lantern post beside the hero's pad. The glow is an additive sprite rather than a point
+ * light: four extra point lights cost every lit pixel on screen and forced shader variants per light count.
+ */
 export class Lantern {
   constructor(scene, position) {
     this.scene = scene;
     this.mesh = new THREE.Mesh(buildVoxelGeometry(buildLanternVoxels(), VOXEL, { x: -1.5, y: 0, z: -1.5 }), voxelModelMaterial());
     this.mesh.castShadow = true;
     this.mesh.position.copy(position);
-    this.light = new THREE.PointLight(0xffc14a, 4, 7, 2);
-    this.light.position.set(0, 11.5 * VOXEL, 0);
-    this.mesh.add(this.light);
+    this.glow = new THREE.Sprite(lanternGlow());
+    this.glow.position.set(0, 11.5 * VOXEL, 0);
+    this.glow.scale.setScalar(1.6);
+    this.mesh.add(this.glow);
     this.phase = Math.random() * 6;
     scene.add(this.mesh);
   }
-  update(_dt, time) { this.light.intensity = 3.6 + Math.sin(time * 7 + this.phase) * 0.5; }
+  update(_dt, time) { this.glow.scale.setScalar(1.5 + Math.sin(time * 7 + this.phase) * 0.15); }
   dispose() { this.scene.remove(this.mesh); this.mesh.geometry.dispose(); }
 }

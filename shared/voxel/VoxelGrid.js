@@ -14,6 +14,10 @@ export const Block = Object.freeze({
   DIRT: 4,
   WOOD: 5,
   LEAF: 6,
+  MUSHROOM: 7, // red cap
+  STEM: 8, // mushroom stem
+  CARVED: 9, // engraved ruin stone
+  LEAF_AUTUMN: 10, // brown/orange canopy
   // building pieces (16..)
   PLANK: 16,
   BEAM: 17,
@@ -75,6 +79,23 @@ export class VoxelGrid {
   columnTop(x, z) {
     for (let y = this.sizeY - 1; y >= 0; y--) {
       if (this.data[this.index(x, y, z)] !== Block.AIR) return y;
+    }
+    return -1;
+  }
+
+  /**
+   * Feet height of the highest standable surface in a column whose supporting block is at index
+   * `fromY` or lower, with `headroom` air blocks above it, or -1. Lets heroes walk under tree
+   * canopies and through ruins: pass the hero's current feet height (floored) to allow a one-block
+   * step up, or sizeY - 1 to find where something falling from above would land.
+   */
+  surfaceAt(x, z, fromY, headroom = 2) {
+    if (x < 0 || z < 0 || x >= this.sizeX || z >= this.sizeZ) return -1;
+    for (let y = Math.min(this.sizeY - 1, Math.floor(fromY)); y >= 0; y--) {
+      if (this.data[this.index(x, y, z)] === Block.AIR) continue;
+      let clear = true;
+      for (let h = 1; h <= headroom && clear; h++) clear = y + h >= this.sizeY || this.data[this.index(x, y + h, z)] === Block.AIR;
+      if (clear) return y + 1;
     }
     return -1;
   }

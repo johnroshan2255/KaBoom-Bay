@@ -1,4 +1,4 @@
-import { PLAYER_COLORS } from "@kaboom-bay/shared";
+import { GameMode, PLAYER_COLORS, TEAM_COLORS, TEAM_NAMES, rankTeams } from "@kaboom-bay/shared";
 
 /** Minimal DOM HUD shared by the sandbox and the online match. Works on touch. */
 const root = () => document.getElementById("ui");
@@ -10,6 +10,7 @@ function ensure() {
   root().innerHTML = `
     <style>
       #ui * { box-sizing: border-box; }
+      #ui::before { content:""; position:absolute; inset:0; pointer-events:none; background: radial-gradient(ellipse at 50% 45%, rgba(0,0,0,0) 55%, rgba(4,25,40,.28) 100%); }
       #ui .px { font-family: "Press Start 2P", monospace; }
       .hud-panel { background:#0f3446; color:#fff; border:3px solid #f1d48e; box-shadow: 0 4px 0 #6d4320, inset 0 0 0 2px #1a4a5f; }
       .hud-top { position:absolute; top:12px; left:12px; right:12px; display:flex; justify-content:space-between; align-items:flex-start; }
@@ -24,6 +25,8 @@ function ensure() {
       .hud-board { position:absolute; left:12px; bottom:18px; display:flex; flex-direction:column; gap:5px; }
       .hud-board div { display:flex; align-items:center; gap:8px; padding:7px 10px; font-family:"Press Start 2P", monospace; font-size:9px; min-width:170px; }
       .hud-board div.me { border-color:#ffd23f; }
+      .hud-board div.team { color:#fff; text-shadow:1px 1px 0 rgba(0,0,0,.5); margin-top:3px; }
+      .hud-board div.team span { color:#fff; }
       .hud-board i.sq { width:10px; height:10px; flex:none; box-shadow: inset -2px -2px 0 rgba(0,0,0,.35), 0 0 0 2px #062a3a; }
       .hud-board span { margin-left:auto; display:flex; align-items:center; gap:5px; color:#ffd23f; }
       .hud-board span .coin { width:9px; height:9px; }
@@ -36,6 +39,15 @@ function ensure() {
       .hud-build button i { width:22px; height:22px; box-shadow: inset -4px -4px 0 rgba(0,0,0,.35), 0 0 0 2px #062a3a; }
       .hud-build button.tool i { background:#1fb6dc; }
       .hud-build button.tool.remove i { background:#ff4b3e; }
+      .hud-bombs { position:absolute; left:50%; bottom:18px; transform:translateX(-50%); display:none; gap:6px; padding:8px; align-items:stretch; pointer-events:auto; }
+      .hud-bombs button { font-family:"Press Start 2P", monospace; font-size:8px; color:#fff; background:#082130; border:2px solid #1a4a5f; padding:6px 6px 5px; min-width:64px; display:flex; flex-direction:column; align-items:center; gap:5px; cursor:pointer; box-shadow: 0 3px 0 #041520; position:relative; }
+      .hud-bombs button:active { transform:translateY(2px); box-shadow:none; }
+      .hud-bombs button.on { border-color:#ffd23f; background:#0f3446; }
+      .hud-bombs button.empty { opacity:.4; cursor:default; }
+      .hud-bombs button i.ball { width:18px; height:18px; border-radius:50%; box-shadow: inset -4px -4px 0 rgba(0,0,0,.35), 0 0 0 2px #062a3a; }
+      .hud-bombs button b { position:absolute; right:-6px; top:-8px; background:#ffd23f; color:#3a1a10; font-size:8px; padding:3px 4px 2px; border:2px solid #3a1a10; }
+      .hud-bombs button small { font-size:6px; color:#a9d6e6; }
+      @media (pointer: coarse) { .hud-bombs button small { display:none; } }
       .hud-build .budget { font-family:"Press Start 2P", monospace; font-size:9px; color:#ffd23f; display:flex; align-items:center; padding:0 10px; }
       .hud-sound { position:absolute; right:12px; top:66px; font-family:"Press Start 2P", monospace; font-size:9px; padding:8px 10px 7px; cursor:pointer; pointer-events:auto; color:#fff; }
       .hud-cross { position:absolute; left:50%; top:50%; width:18px; height:18px; transform:translate(-50%,-50%); display:none; pointer-events:none; }
@@ -55,6 +67,8 @@ function ensure() {
         .hud-label { font-size:7px; padding:4px 6px 3px; }
         .hud-build { left:50%; bottom:auto; top:44px; transform:translateX(-50%); max-width:56vw; overflow-x:auto; gap:4px; padding:5px; }
         .hud-build button { min-width:46px; font-size:6px; padding:4px 4px 3px; } .hud-build button i { width:16px; height:16px; }
+        .hud-bombs { left:50%; bottom:auto; top:44px; transform:translateX(-50%); gap:4px; padding:5px; }
+        .hud-bombs button { min-width:48px; font-size:6px; padding:4px 4px 3px; } .hud-bombs button i.ball { width:14px; height:14px; }
         .hud-fuse { width:120px; height:12px; }
       }
       .hud-pop { position:absolute; font-family:"Press Start 2P", monospace; font-size:18px; text-shadow:2px 2px 0 rgba(0,0,0,.5); animation: pop 1s ease-out forwards; pointer-events:none; transform:translate(-50%,-50%); }
@@ -69,6 +83,7 @@ function ensure() {
     <div data-labels></div>
     <div class="hud-hint hud-panel" data-hint></div>
     <div class="hud-build hud-panel" data-build></div>
+    <div class="hud-bombs hud-panel" data-bombs></div>
     <button class="hud-sound hud-panel" data-sound>SND ON</button>
     <button class="hud-view hud-panel" data-view>VIEW: 3RD</button>
     <div class="hud-zoom"><button class="hud-panel" data-zoom-in title="Zoom in (+)">+</button><button class="hud-panel" data-zoom-out title="Zoom out (-)">-</button></div>
@@ -83,6 +98,7 @@ function ensure() {
     board: root().querySelector("[data-board]"),
     labels: root().querySelector("[data-labels]"),
     build: root().querySelector("[data-build]"),
+    bombs: root().querySelector("[data-bombs]"),
     sound: root().querySelector("[data-sound]"),
     view: root().querySelector("[data-view]"),
     zoomIn: root().querySelector("[data-zoom-in]"),
@@ -102,10 +118,10 @@ export const hud = {
   setFuse(fraction) {
     const { fuse, fuseBar } = ensure();
     if (fraction === null) {
-      fuse.style.display = "none";
+      if (fuse.style.display !== "none") fuse.style.display = "none";
       return;
     }
-    fuse.style.display = "block";
+    if (fuse.style.display !== "block") fuse.style.display = "block";
     fuseBar.style.width = `${Math.max(0, fraction) * 100}%`;
     fuseBar.style.background = fraction > 0.5 ? "#5df26a" : fraction > 0.25 ? "#ffd23f" : "#ff4b3e";
   },
@@ -124,23 +140,37 @@ export const hud = {
     root().appendChild(el);
     setTimeout(() => el.remove(), 1000);
   },
-  /** Phase name + mm:ss countdown. Hidden in the lobby. */
+  /** Phase name + mm:ss countdown. Hidden in the lobby. Called every frame, so it only writes when the second changes. */
   setPhase(phase, msRemaining) {
     const { phase: el } = ensure();
-    if (!phase || phase === "lobby") { el.style.display = "none"; return; }
-    el.style.display = "block";
+    if (!phase || phase === "lobby") {
+      if (el._key !== "hidden") { el._key = "hidden"; el.style.display = "none"; }
+      return;
+    }
     const s = Math.max(0, Math.ceil(msRemaining / 1000));
+    const key = `${phase}:${s}`;
+    if (el._key === key) return;
+    el._key = key;
     const label = { build: "BUILD", combat: "COMBAT", results: "RESULTS" }[phase] ?? phase.toUpperCase();
     el.style.display = "flex";
     el.innerHTML = `${label}<b>${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}</b>`;
   },
-  setScoreboard(players, myKey) {
+  /** Bottom-left standings. Free-for-all: one row per player. Teams: a team total row, then its members. */
+  setScoreboard(players, myKey, mode = GameMode.FFA) {
     const { board } = ensure();
-    const colorHex = (i) => `#${PLAYER_COLORS[i % PLAYER_COLORS.length].toString(16).padStart(6, "0")}`;
+    const hex = (c) => `#${c.toString(16).padStart(6, "0")}`;
+    const row = (p, color) => `<div class="hud-panel ${p.key === myKey ? "me" : ""}"><i class="sq" style="background:${color}"></i>${esc(p.name)}${p.isBot ? " [bot]" : ""}<span><i class="coin"></i>${p.coins}</span></div>`;
+    if (mode === GameMode.TEAMS) {
+      board.innerHTML = rankTeams(players, mode)
+        .map((t) => `<div class="hud-panel team" style="background:${hex(TEAM_COLORS[t.team % TEAM_COLORS.length])}">${esc(TEAM_NAMES[t.team] ?? `Team ${t.team + 1}`)}<span><i class="coin"></i>${t.coins}</span></div>` +
+          t.members.map((p) => row(p, hex(TEAM_COLORS[t.team % TEAM_COLORS.length]))).join(""))
+        .join("");
+      return;
+    }
     board.innerHTML = players
       .slice()
       .sort((a, b) => b.coins - a.coins || a.islandIndex - b.islandIndex)
-      .map((p) => `<div class="hud-panel ${p.key === myKey ? "me" : ""}"><i class="sq" style="background:${colorHex(p.islandIndex)}"></i>${esc(p.name)}${p.isBot ? " [bot]" : ""}<span><i class="coin"></i>${p.coins}</span></div>`)
+      .map((p) => row(p, hex(PLAYER_COLORS[p.islandIndex % PLAYER_COLORS.length])))
       .join("");
   },
   /** Floating name tags over islands. items: { x, y, text, color, mine } in screen px. */
@@ -177,6 +207,34 @@ export const hud = {
     build.querySelector("[data-remove]")?.classList.toggle("on", mode === "remove");
     const budget = build.querySelector("[data-budget]");
     if (budget) budget.textContent = `${count}/${max}`;
+  },
+  /**
+   * Combat bomb selector: one button per bomb type. types: [{ type, name, color, key }], onSelect(type).
+   * Counts come from setBombState(); the standard bomb is unlimited.
+   */
+  showBombBar({ types, onSelect }) {
+    const { bombs } = ensure();
+    bombs.style.display = "flex";
+    bombs.innerHTML = types.map((t) => `<button data-bomb="${t.type}" title="${t.key}"><i class="ball" style="background:${t.color}"></i>${esc(t.name)}<small>${t.key ? `KEY ${t.key}` : ""}</small><b hidden></b></button>`).join("");
+    bombs.querySelectorAll("[data-bomb]").forEach((b) => b.addEventListener("click", () => onSelect(b.dataset.bomb)));
+    ensure().hint.classList.add("with-bar");
+  },
+  /** counts: { [type]: n } for special bombs; selected: current BombType. */
+  setBombState({ counts, selected }) {
+    const { bombs } = ensure();
+    bombs.querySelectorAll("[data-bomb]").forEach((b) => {
+      const type = b.dataset.bomb, n = type === "standard" ? Infinity : counts[type] ?? 0;
+      b.classList.toggle("on", type === selected);
+      b.classList.toggle("empty", n === 0);
+      const badge = b.querySelector("b");
+      badge.hidden = !(n > 0 && n !== Infinity);
+      badge.textContent = n === Infinity ? "" : `x${n}`;
+    });
+  },
+  hideBombBar() {
+    const { bombs, hint } = ensure();
+    bombs.style.display = "none";
+    hint.classList.remove("with-bar");
   },
   hideBuildBar() {
     const { build, hint } = ensure();

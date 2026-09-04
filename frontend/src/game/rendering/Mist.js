@@ -1,10 +1,12 @@
 import * as THREE from "three";
 import { WATER_LEVEL } from "@kaboom-bay/shared";
+import { quality } from "./quality.js";
 
 /**
- * Low-lying mist hugging an island's cliffs: a ring of soft camera-facing sprites that drift,
- * bob and breathe. Cheap enough for four islands on a phone, and reads as volumetric from
- * the game's fixed camera distance.
+ * Low-lying mist hugging an island's cliffs: a ring of soft camera-facing puffs that drift, bob and
+ * breathe. All puffs of an island are one geometry drawn with one shader call; the drift, bob and
+ * opacity animation run in the vertex shader from a time uniform, so the CPU does nothing per frame.
+ * The quality tier decides how many puffs are drawn (draw range), so downgrades apply instantly.
  */
 let mistTexture = null;
 function texture() {
@@ -23,49 +25,95 @@ function texture() {
   return mistTexture;
 }
 
+let sharedMaterial = null;
+function material() {
+  if (sharedMaterial) return sharedMaterial;
+  sharedMaterial = new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, map: { value: texture() }, uColor: { value: new THREE.Color(0xe6f8ff) }, ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog) },
+    transparent: true,
+    depthWrite: false,
+    fog: true,
+    vertexShader: `
+      uniform float uTime;
+      attribute vec2 corner;      // quad corner -0.5..0.5
+      attribute vec4 orbit;       // angle0, speed, radius, y
+      attribute vec4 look;        // width, height, bobPhase, baseOpacity
+      varying vec2 vUv;
+      varying float vAlpha;
+      #include <fog_pars_vertex>
+      void main() {
+        float angle = orbit.x + orbit.y * uTime;
+        vec3 center = vec3(cos(angle) * orbit.z, orbit.w + sin(uTime * 0.6 + look.z) * 0.25, sin(angle) * orbit.z);
+        vec4 mvPosition = modelViewMatrix * vec4(center, 1.0);
+        mvPosition.xy += corner * look.xy;          // billboard in view space
+        gl_Position = projectionMatrix * mvPosition;
+        vUv = corner + 0.5;
+        vAlpha = look.w * (0.8 + 0.2 * sin(uTime * 0.4 + look.z));
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform vec3 uColor;
+      varying vec2 vUv;
+      varying float vAlpha;
+      #include <fog_pars_fragment>
+      void main() {
+        vec4 tex = texture2D(map, vUv);
+        gl_FragColor = vec4(uColor * tex.rgb, tex.a * vAlpha);
+        #include <fog_fragment>
+      }`,
+  });
+  return sharedMaterial;
+}
+
+const MAX_PUFFS = 20;
+const CORNERS = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+
 export class MistRing {
-  constructor(scene, center, radius, { count = 20, seed = 1 } = {}) {
+  constructor(scene, center, radius, { count = MAX_PUFFS, seed = 1 } = {}) {
     this.scene = scene;
-    this.group = new THREE.Group();
-    this.puffs = [];
     let r = seed >>> 0;
     const rand = () => ((r = (r * 1664525 + 1013904223) >>> 0) / 4294967296);
-    for (let i = 0; i < count; i++) {
-      const mat = new THREE.SpriteMaterial({
-        map: texture(),
-        color: 0xe6f8ff,
-        transparent: true,
-        opacity: 0.38 + rand() * 0.22,
-        depthWrite: false,
-      });
-      const sprite = new THREE.Sprite(mat);
+    const n = Math.min(count, MAX_PUFFS);
+    const corner = new Float32Array(n * 4 * 2), orbit = new Float32Array(n * 4 * 4), look = new Float32Array(n * 4 * 4);
+    const index = [];
+    for (let i = 0; i < n; i++) {
       const size = 7 + rand() * 6;
-      sprite.scale.set(size, size * 0.7, 1);
-      this.puffs.push({
-        sprite,
-        angle: (i / count) * Math.PI * 2 + rand() * 0.4,
-        speed: (0.03 + rand() * 0.04) * (rand() < 0.5 ? 1 : -1),
-        radius: radius - 1 + rand() * 4.5,
-        y: WATER_LEVEL + 0.4 + rand() * 2.2,
-        bob: rand() * Math.PI * 2,
-        baseOpacity: mat.opacity,
-      });
-      this.group.add(sprite);
+      const o = [(i / n) * Math.PI * 2 + rand() * 0.4, (0.03 + rand() * 0.04) * (rand() < 0.5 ? 1 : -1), radius - 1 + rand() * 4.5, WATER_LEVEL + 0.4 + rand() * 2.2];
+      const l = [size, size * 0.7, rand() * Math.PI * 2, 0.38 + rand() * 0.22];
+      for (let v = 0; v < 4; v++) {
+        const vi = i * 4 + v;
+        corner.set(CORNERS[v], vi * 2);
+        orbit.set(o, vi * 4);
+        look.set(l, vi * 4);
+      }
+      const b = i * 4;
+      index.push(b, b + 1, b + 2, b, b + 2, b + 3);
     }
-    this.group.position.set(center.x, 0, center.z);
-    scene.add(this.group);
+    this.geometry = new THREE.BufferGeometry();
+    this.geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(n * 4 * 3), 3)); // unused, keeps three happy
+    this.geometry.setAttribute("corner", new THREE.BufferAttribute(corner, 2));
+    this.geometry.setAttribute("orbit", new THREE.BufferAttribute(orbit, 4));
+    this.geometry.setAttribute("look", new THREE.BufferAttribute(look, 4));
+    this.geometry.setIndex(index);
+    this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), radius + 12);
+    this.mesh = new THREE.Mesh(this.geometry, material());
+    this.mesh.position.set(center.x, 0, center.z);
+    this.mesh.renderOrder = 2;
+    scene.add(this.mesh);
+    this.count = n;
+    this._applyTier = () => this.geometry.setDrawRange(0, Math.min(this.count, quality.settings.mistPuffs) * 6);
+    this._applyTier();
+    this._unsubscribe = quality.onChange(this._applyTier);
   }
 
-  update(dt, time) {
-    for (const p of this.puffs) {
-      p.angle += p.speed * dt;
-      p.sprite.position.set(Math.cos(p.angle) * p.radius, p.y + Math.sin(time * 0.6 + p.bob) * 0.25, Math.sin(p.angle) * p.radius);
-      p.sprite.material.opacity = p.baseOpacity * (0.8 + 0.2 * Math.sin(time * 0.4 + p.bob));
-    }
+  update(_dt, time) {
+    material().uniforms.uTime.value = time;
   }
 
   dispose() {
-    this.scene.remove(this.group);
-    for (const p of this.puffs) p.sprite.material.dispose();
+    this._unsubscribe();
+    this.scene.remove(this.mesh);
+    this.geometry.dispose();
   }
 }

@@ -1,5 +1,6 @@
 /**
- * On-screen controls for phones and tablets: a virtual joystick, a look zone for first person,
+ * On-screen controls for phones and tablets: a virtual joystick, a full-screen look zone for first person
+ * (third person / top view rotate by dragging the canvas directly),
  * and context buttons (THROW / GRAB in combat, PLACE / REMOVE / ROTATE while building, VIEW).
  * Only created on coarse-pointer devices.
  */
@@ -11,8 +12,9 @@ export class TouchControls {
     this.el = document.createElement("div");
     this.el.id = "touch";
     this.el.innerHTML = `<style>
-      #touch { position:fixed; inset:0; pointer-events:none; font-family:"Press Start 2P", monospace; user-select:none; -webkit-user-select:none; }
-      #touch .look { position:absolute; top:0; right:0; bottom:0; width:58%; pointer-events:none; touch-action:none; }
+      #touch[hidden] { display:none; }
+      #touch { position:fixed; inset:0; z-index:1; pointer-events:none; font-family:"Press Start 2P", monospace; user-select:none; -webkit-user-select:none; }
+      #touch .look { position:absolute; inset:0; pointer-events:none; touch-action:none; }
       #touch .look.on { pointer-events:auto; }
       #touch .joy { position:absolute; left:calc(18px + env(safe-area-inset-left)); bottom:calc(18px + env(safe-area-inset-bottom)); width:124px; height:124px; border-radius:50%; background:rgba(8,33,48,.55); border:3px solid #f1d48e; pointer-events:auto; touch-action:none; }
       #touch .joy i { position:absolute; left:50%; top:50%; width:52px; height:52px; margin:-26px; border-radius:50%; background:#1fb6dc; border:3px solid #062a3a; box-shadow: inset -5px -5px 0 rgba(0,0,0,.3); }
@@ -51,7 +53,7 @@ export class TouchControls {
 
     // joystick
     let joyId = null, cx = 0, cy = 0;
-    this.joy.addEventListener("pointerdown", (e) => { joyId = e.pointerId; const r = this.joy.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2; this.joy.setPointerCapture(e.pointerId); });
+    this.joy.addEventListener("pointerdown", (e) => { joyId = e.pointerId; const r = this.joy.getBoundingClientRect(); cx = r.left + r.width / 2; cy = r.top + r.height / 2; try { this.joy.setPointerCapture(e.pointerId); } catch { /* synthetic event */ } });
     this.joy.addEventListener("pointermove", (e) => {
       if (e.pointerId !== joyId) return;
       let dx = e.clientX - cx, dy = e.clientY - cy;
@@ -66,7 +68,7 @@ export class TouchControls {
 
     // look zone (first person)
     let lookId = null, lx = 0, ly = 0;
-    this.look.addEventListener("pointerdown", (e) => { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; this.look.setPointerCapture(e.pointerId); });
+    this.look.addEventListener("pointerdown", (e) => { lookId = e.pointerId; lx = e.clientX; ly = e.clientY; try { this.look.setPointerCapture(e.pointerId); } catch { /* synthetic event */ } });
     this.look.addEventListener("pointermove", (e) => { if (e.pointerId !== lookId) return; this.h.onLook?.((e.clientX - lx) * 2.2, (e.clientY - ly) * 2.2); lx = e.clientX; ly = e.clientY; });
     const lookEnd = (e) => { if (e.pointerId === lookId) lookId = null; };
     this.look.addEventListener("pointerup", lookEnd);
@@ -88,6 +90,7 @@ export class TouchControls {
   /** phase: "build" | "combat" | other; mode: "first" | "third" */
   setContext({ phase, mode }) {
     const combat = phase === "combat", build = phase === "build";
+    this.el.hidden = !(combat || build); // no joystick over the lobby / results panels
     this.action.textContent = combat ? "THROW" : "PLACE";
     this.sec.textContent = combat ? "GRAB" : "REMOVE";
     this.action.hidden = !(combat || build);

@@ -15,6 +15,7 @@ import { Island } from "./islands/Island.js";
 import { LocalBombSim } from "./bombs/LocalBombSim.js";
 import { AimController } from "./bombs/AimController.js";
 import { BombView } from "./bombs/BombView.js";
+import { CrateView } from "./bombs/CrateView.js";
 import { TrajectoryPreview } from "./bombs/TrajectoryPreview.js";
 import { hud } from "../ui/hud.js";
 import { PlayerAvatar } from "./characters/CharacterFactory.js";
@@ -77,14 +78,26 @@ export class Sandbox {
       onRelease: ({ velocity }) => this._onRelease(velocity),
       onCancel: () => this._onCancel(),
     });
+    this.orbit.isPointerClaimed = (id) => this.aim.pointerId === id;
 
     this._spawnPadBomb();
     if (import.meta.env.DEV) window.__sandbox = this; // debugging aid, dev builds only
     hud.setCoins(0);
-    hud.setHint("Drag back from the bomb and release to throw. Tap a landed bomb to pick it up. Right-drag / two fingers to orbit.");
+    hud.setHint("Drag back from the bomb and release to throw. Tap a landed bomb to pick it up. Drag anywhere else to orbit, pinch or wheel to zoom.");
 
     window.addEventListener("resize", () => this._resize());
     this._resize();
+    {
+      // compile every shader before the first frame: effects, a bomb with its fuse ring, the aim preview
+      this._anchorBomb = new BombView(this.scene); // stays hidden in the scene so the bomb shaders stay resident
+      this._anchorBomb.updateFuse(0.5, this.orbit.camera, 0);
+      this.scene.remove(this._anchorBomb.group);
+      this._anchorCrate = new CrateView(this.scene, "mega"); // same for the supply crate materials
+      this.scene.remove(this._anchorCrate.group);
+      this.preview.show(new THREE.Vector3(0, -50, 0), new THREE.Vector3(1, 1, 0), () => false);
+      this.effects.prewarm(this.renderer, this.orbit.camera, [this._anchorBomb.group, this._anchorCrate.group]);
+      this.preview.hide();
+    }
     this._last = performance.now();
     requestAnimationFrame((t) => this._frame(t));
   }

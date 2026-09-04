@@ -1,28 +1,37 @@
 import {
   BUILD_PHASE_DURATION,
   COMBAT_PHASE_DURATION,
+  DEFAULT_MATCH_MINUTES,
   LOBBY_COUNTDOWN,
+  LOBBY_SOLO_WAIT,
   MatchPhase,
   RESULTS_DURATION,
+  matchDurations,
 } from "../constants.js";
 
 export const PHASE_ORDER = Object.freeze([MatchPhase.LOBBY, MatchPhase.BUILD, MatchPhase.COMBAT, MatchPhase.RESULTS]);
 
 export const DEFAULT_DURATIONS = Object.freeze({
   lobby: LOBBY_COUNTDOWN,
+  soloWait: LOBBY_SOLO_WAIT,
   [MatchPhase.BUILD]: BUILD_PHASE_DURATION,
   [MatchPhase.COMBAT]: COMBAT_PHASE_DURATION,
   [MatchPhase.RESULTS]: RESULTS_DURATION,
 });
 
-/** Shorter matches for local testing (KABOOM_PHASE_SCALE env on the server). Results stays readable. */
-export function scaledDurations(scale = 1) {
-  if (!(scale > 0) || scale === 1) return DEFAULT_DURATIONS;
+/**
+ * Phase durations for a match of `minutes`, optionally scaled for local testing
+ * (KABOOM_PHASE_SCALE env on the server). Results stays readable.
+ */
+export function scaledDurations(scale = 1, minutes = DEFAULT_MATCH_MINUTES) {
+  const k = scale > 0 ? scale : 1;
+  const { buildMs, combatMs } = matchDurations(minutes);
   return {
-    lobby: Math.round(LOBBY_COUNTDOWN * scale),
-    [MatchPhase.BUILD]: Math.round(BUILD_PHASE_DURATION * scale),
-    [MatchPhase.COMBAT]: Math.round(COMBAT_PHASE_DURATION * scale),
-    [MatchPhase.RESULTS]: Math.max(3000, Math.round(RESULTS_DURATION * scale)),
+    lobby: Math.round(LOBBY_COUNTDOWN * k),
+    soloWait: Math.round(LOBBY_SOLO_WAIT * k),
+    [MatchPhase.BUILD]: Math.round(buildMs * k),
+    [MatchPhase.COMBAT]: Math.round(combatMs * k),
+    [MatchPhase.RESULTS]: Math.max(3000, Math.round(RESULTS_DURATION * k)),
   };
 }
 

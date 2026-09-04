@@ -1,13 +1,16 @@
 import * as THREE from "three";
 import { WATER_LEVEL } from "@kaboom-bay/shared";
+import { quality } from "./quality.js";
 
 /**
  * Sea plane: a Lambert material (keeps cloud shadows and fog) with a small shader patch that adds
- * rolling waves in the vertex stage and a two-octave shimmer / caustic pattern in the fragment stage.
+ * rolling waves in the vertex stage and, on capable devices, a two-octave shimmer / caustic pattern
+ * in the fragment stage. The lowest tier keeps the waves and a flat tint: the noise is the expensive part.
  */
 export function createWater() {
   const uniforms = { uTime: { value: 0 } };
-  const material = new THREE.MeshLambertMaterial({ color: 0x0e8fbf, transparent: true, opacity: 0.94 });
+  const { waterSegments, waterDetail } = quality.settings;
+  const material = new THREE.MeshLambertMaterial({ color: waterDetail ? 0x17a6d6 : 0x179fce, transparent: true, opacity: 0.96 });
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uniforms.uTime;
     shader.vertexShader = shader.vertexShader
@@ -16,6 +19,7 @@ export function createWater() {
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldXZ = wp.xz;
         transformed.z += sin(wp.x * 0.28 + uTime * 1.1) * 0.09 + sin(wp.z * 0.23 - uTime * 0.9) * 0.09;`);
+    if (!waterDetail) return;
     shader.fragmentShader = shader.fragmentShader
       .replace("#include <common>", `#include <common>
         uniform float uTime;
@@ -27,11 +31,11 @@ export function createWater() {
         float n1 = vnoise(vWorldXZ * 0.35 + vec2(uTime * 0.06, -uTime * 0.04));
         float n2 = vnoise(vWorldXZ * 0.9 - vec2(uTime * 0.1, uTime * 0.07));
         float shimmer = smoothstep(0.35, 0.75, n1 * 0.55 + n2 * 0.45);
-        diffuseColor.rgb = mix(vec3(0.02, 0.44, 0.66), vec3(0.08, 0.64, 0.82), shimmer * 0.8);
-        float sparkle = smoothstep(0.86, 0.97, n2 * n1 * 1.5 + 0.1 * sin(uTime * 3.0 + vWorldXZ.x));
-        diffuseColor.rgb += sparkle * 0.22;`);
+        diffuseColor.rgb = mix(vec3(0.07, 0.62, 0.80), vec3(0.12, 0.72, 0.88), shimmer * 0.5);
+        float sparkle = smoothstep(0.9, 0.98, n2 * n1 * 1.5 + 0.1 * sin(uTime * 3.0 + vWorldXZ.x));
+        diffuseColor.rgb += sparkle * 0.08;`);
   };
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600, 120, 120), material);
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(600, 600, waterSegments, waterSegments), material);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.y = WATER_LEVEL;
   mesh.receiveShadow = true;
