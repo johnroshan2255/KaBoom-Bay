@@ -151,6 +151,7 @@ export const Message = Object.freeze({
   HERO_FELL: "hero_fell",                        // server -> clients: { by, x, z } splash where a hero hit the water
   SUPPLY_DROP: "supply_drop",                    // server -> clients: { id, islandIndex } a crate is falling
   LOBBY_SETTINGS: "lobby_settings",              // host -> server (lobby): { bots?, minutes? }
+  CHAT: "chat",                                  // client -> server: { text, team? }; server -> clients: { from, name, islandIndex, team, text, scope }
   PLAYER_READY: "player_ready",
   START_NOW: "start_now",                        // client -> server (lobby): begin now, bots fill the empty islands
   SWITCH_TEAM: "switch_team",                    // client -> server (lobby, teams mode): { team } to join, default: the other team
@@ -158,6 +159,12 @@ export const Message = Object.freeze({
   BOMB_EXPLODED: "bomb_exploded",
   MATCH_RESULTS: "match_results",
 });
+
+// ---------- Chat ----------
+export const CHAT_MAX_LEN = 120;
+export const CHAT_RATE_MS = 700;                 // min gap between two messages from one player
+export const CHAT_HISTORY = 8;                   // lines kept on screen
+export const QUICK_CHAT = Object.freeze(["Hi!", "Nice shot!", "Help!", "Bomb incoming!", "Go left", "Go right", "Grab it!", "GG"]);
 
 // ---------- Players / layout ----------
 export const PLAYER_COLORS = Object.freeze([0xff5c5c, 0x4da3ff, 0xffd23f, 0x62d26f]); // island 0..3

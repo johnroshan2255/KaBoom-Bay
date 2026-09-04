@@ -61,6 +61,7 @@ each team card shows a **Join** button while the other side still has a free isl
 | Throw | Drag back from your bomb (3rd), hold + release (1st) | Hold THROW, release |
 | Grab a landed bomb / crate | Tap it or press E | GRAB |
 | Pick bomb type | 1–4 or the bomb bar | Bomb bar |
+| Chat | Enter or T opens the box, Enter sends, Esc closes | CHAT button, quick phrases |
 
 ## Art direction
 
@@ -97,6 +98,8 @@ What the build does for the portal (see `frontend/src/platform/`):
   build phase and `gameplayStop` at results or when a player leaves mid-match; `happytime` only on a win; one
   `midgame` ad request at the results screen, audio muted only once the ad actually starts and restored on finish
   or error; `game.settings.muteAudio` overrides the in-game sound toggle; every call is a no-op outside the portal.
+- **Chat**: text is trimmed, capped at 120 characters, rate limited server-side and run through a profanity
+  filter on the server before it is relayed; the portal's `disableChat` setting removes the chat entirely.
 - **Multiplayer**: invite links carry `?code=XXXXX` and `getInviteParam("code")` routes straight to the room;
   `showInviteButton` while a room is joinable, hidden when it starts; `isInstantMultiplayer` skips the menu;
   the same group carries on in the same room after each round (new islands, scores reset); CrazyGames usernames

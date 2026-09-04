@@ -158,6 +158,9 @@ export const hud = {
   /** Bottom-left standings. Free-for-all: one row per player. Teams: a team total row, then its members. */
   setScoreboard(players, myKey, mode = GameMode.FFA) {
     const { board } = ensure();
+    // chat panel sits just above the board: publish its height (rows incl. team headers)
+    const rows = mode === GameMode.TEAMS ? players.length + 2 : players.length;
+    root().style.setProperty("--board-h", `${rows * 34}px`);
     const hex = (c) => `#${c.toString(16).padStart(6, "0")}`;
     const row = (p, color) => `<div class="hud-panel ${p.key === myKey ? "me" : ""}"><i class="sq" style="background:${color}"></i>${esc(p.name)}${p.isBot ? " [bot]" : ""}<span><i class="coin"></i>${p.coins}</span></div>`;
     if (mode === GameMode.TEAMS) {

@@ -30,6 +30,7 @@ export class TouchControls {
       #touch .zoom { position:absolute; right:calc(12px + env(safe-area-inset-right)); top:158px; display:flex; gap:6px; }
       #touch .zoom button { width:40px; height:36px; border-radius:0; font-size:12px; background:#0f3446; color:#fff; border:3px solid #f1d48e; box-shadow:0 4px 0 #6d4320; }
       #touch .view { position:absolute; right:calc(12px + env(safe-area-inset-right)); top:110px; width:auto; height:auto; border-radius:0; padding:8px 10px 7px; background:#0f3446; color:#fff; border:3px solid #f1d48e; box-shadow:0 4px 0 #6d4320; font-size:9px; }
+      #touch button.chat { top:206px; bottom:auto; right:calc(12px + env(safe-area-inset-right)); width:auto; height:auto; }
     </style>
     <div class="look" data-look></div>
     <div class="joy" data-joy><i></i></div>
@@ -39,6 +40,7 @@ export class TouchControls {
       <button class="action" data-action>THROW</button>
     </div>
     <button class="view" data-view>VIEW</button>
+    <button class="view chat" data-chat title="Chat">CHAT</button>
     <div class="zoom" data-zoom><button data-zin>+</button><button data-zout>-</button></div>`;
     document.body.appendChild(this.el);
 
@@ -50,6 +52,7 @@ export class TouchControls {
     this.sec = q("[data-sec]");
     this.rot = q("[data-rotate]");
     this.view = q("[data-view]");
+    this.chatBtn = q("[data-chat]");
 
     // joystick
     let joyId = null, cx = 0, cy = 0;
@@ -82,6 +85,7 @@ export class TouchControls {
     this.sec.addEventListener("click", () => this.h.onSecondary?.());
     this.rot.addEventListener("click", () => this.h.onRotate?.());
     this.view.addEventListener("click", () => this.h.onView?.());
+    this.chatBtn.addEventListener("click", () => this.h.onChat?.());
     q("[data-zin]").addEventListener("click", () => this.h.onZoom?.(1));
     q("[data-zout]").addEventListener("click", () => this.h.onZoom?.(-1));
     this.zoom = q("[data-zoom]");

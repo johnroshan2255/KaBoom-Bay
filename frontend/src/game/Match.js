@@ -44,6 +44,7 @@ import { HeroController } from "./player/HeroController.js";
 import { CameraRig } from "./rendering/CameraRig.js";
 import { FrameGovernor } from "./rendering/quality.js";
 import { TouchControls, isTouchDevice } from "../ui/touch.js";
+import { ChatPanel } from "../ui/chat.js";
 import { cg } from "../platform/crazygames.js";
 import { BOMB_MAX_THROW_POWER, BOMB_PICKUP_RADIUS, THROW_CHARGE_MS } from "@kaboom-bay/shared";
 
@@ -102,6 +103,7 @@ export class Match {
     this._bind();
     this._bindCombat();
     this._bindBuild();
+    this._bindChat(); // before the touch controls, which hide their CHAT button when chat is disabled
     this._bindControls();
     this._focusIsland(this.myIsland);
     hud.setSound(sound.enabled, () => { sound.setEnabled(!sound.enabled); hud.setSound(sound.enabled); sound.play("click"); });
@@ -254,6 +256,23 @@ export class Match {
     hud.setBuildState({ type: this.build.type, mode: this.build.mode, count: this.build.pieceCount, max: this.build.budget });
   }
 
+  // ---------- chat ----------
+
+  _bindChat() {
+    if (cg.settings()?.disableChat) return; // portal setting: no chat at all
+    this.chat = new ChatPanel({ teams: this.mode === GameMode.TEAMS, onSend: (text, team) => this.net.send(Message.CHAT, { text, team }) });
+    this.room.onMessage(Message.CHAT, (m) => {
+      this.chat?.add(m, { mine: m.from === this.myKey, teamsMode: this.mode === GameMode.TEAMS });
+      if (m.from !== this.myKey) sound.play("click", { volume: 0.5 });
+    });
+    this._onChatKey = (e) => {
+      if (!this.chat || e.target?.tagName === "INPUT") return;
+      if (e.key === "Enter" || e.code === "KeyT") { e.preventDefault(); this.chat.open(); }
+    };
+    window.addEventListener("keydown", this._onChatKey);
+    cg.onSettingsChange((s) => { if (s?.disableChat && this.chat) { this.chat.dispose(); this.chat = null; } });
+  }
+
   // ---------- controls: view toggle, first-person input, touch ----------
 
   _bindControls() {
@@ -291,7 +310,9 @@ export class Match {
         onRotate: () => this.build.rotate(),
         onView: () => this.toggleView(),
         onZoom: (dir) => (dir > 0 ? this.orbit.zoomIn() : this.orbit.zoomOut()),
+        onChat: () => this.chat?.toggle(),
       });
+      if (!this.chat) this.touch.chatBtn.hidden = true;
       this.touch.setContext({ phase: this.phase, mode: this.rig.mode });
     }
   }
@@ -888,6 +909,8 @@ export class Match {
     this.disposed = true;
     if (this.phase === MatchPhase.BUILD || this.phase === MatchPhase.COMBAT) cg.gameplayStop(); // leaving mid-match ends the gameplay session
     cg.hideInviteButton();
+    window.removeEventListener("keydown", this._onChatKey);
+    this.chat?.dispose();
     cancelAnimationFrame(this._raf);
     window.removeEventListener("resize", this._onResize);
     this.detachCamera();

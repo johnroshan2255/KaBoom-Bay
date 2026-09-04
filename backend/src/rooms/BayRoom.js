@@ -1,5 +1,5 @@
 import { Room, matchMaker } from "colyseus";
-import { DEFAULT_BOTS, DEFAULT_MATCH_MINUTES, GameMode, MAX_BOTS, MAX_PLAYERS, MIN_PLAYERS_TO_START, MatchPhase, Message, ROOM_NAME, SERVER_TICK_MS, TEAM_COUNT, matchDurations, normalizeMode, pickIsland, scaledDurations, teamIslands, teamOf } from "@kaboom-bay/shared";
+import { CHAT_RATE_MS, DEFAULT_BOTS, DEFAULT_MATCH_MINUTES, GameMode, MAX_BOTS, sanitizeChat, sameTeam, MAX_PLAYERS, MIN_PLAYERS_TO_START, MatchPhase, Message, ROOM_NAME, SERVER_TICK_MS, TEAM_COUNT, matchDurations, normalizeMode, pickIsland, scaledDurations, teamIslands, teamOf } from "@kaboom-bay/shared";
 import { BayState, PlayerState } from "../schema/BayState.js";
 import { createIslands } from "../logic/islands.js";
 import { placePiece, removePiece } from "../logic/building.js";
@@ -71,6 +71,8 @@ export class BayRoom extends Room {
     });
     this.onMessage(Message.SWITCH_TEAM, (client, msg) => this.switchTeam(client, Number.isInteger(msg?.team) ? msg.team : undefined));
     this.onMessage(Message.LOBBY_SETTINGS, (client, msg) => this.applySettings(client, msg));
+    this.onMessage(Message.CHAT, (client, msg) => this.chat(client, msg));
+    this.lastChatAt = new Map();
     this.onMessage(Message.PLACE_PIECE, (client, msg) => {
       placePiece(this, this.state.players.get(client.sessionId), msg);
     });
@@ -98,6 +100,27 @@ export class BayRoom extends Room {
     this.state.players.set(client.sessionId, player);
     if (!this.state.hostId) this.state.hostId = client.sessionId; // first human hosts: picks bots and match length
     client.send(Message.WELCOME, { now: Date.now(), islandIndex, mode: this.state.mode });
+  }
+
+  /**
+   * CHAT: humans only, rate limited, cleaned and profanity-filtered. In teams mode `team: true` reaches only
+   * teammates (co-op channel); everything else goes to the whole room.
+   */
+  chat(client, msg) {
+    const player = this.state.players.get(client.sessionId);
+    if (!player || player.isBot) return;
+    const now = Date.now();
+    if (now - (this.lastChatAt.get(client.sessionId) ?? 0) < CHAT_RATE_MS) return;
+    const text = sanitizeChat(msg?.text);
+    if (!text) return;
+    this.lastChatAt.set(client.sessionId, now);
+    const teamOnly = this.state.mode === GameMode.TEAMS && msg?.team === true;
+    const payload = { from: client.sessionId, name: player.name, islandIndex: player.islandIndex, team: player.team, text, scope: teamOnly ? "team" : "all" };
+    if (!teamOnly) { this.broadcast(Message.CHAT, payload); return; }
+    for (const c of this.clients) {
+      const p = this.state.players.get(c.sessionId);
+      if (p && sameTeam(p.islandIndex, player.islandIndex, this.state.mode)) c.send(Message.CHAT, payload);
+    }
   }
 
   /** LOBBY_SETTINGS from the host: bot count (free-for-all) and match length. Teams always fill to 2v2. */
@@ -165,6 +188,7 @@ export class BayRoom extends Room {
     const humans = [...this.state.players.entries()].filter(([, p]) => !p.isBot && p.connected);
     if (!humans.length) { this.disconnect(); return; }
     if (this.state.hostId === client.sessionId) this.state.hostId = humans[0][0]; // host left: next human hosts
+    this.lastChatAt.delete(client.sessionId);
   }
 
   onDispose() {

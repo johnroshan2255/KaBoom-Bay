@@ -10,6 +10,7 @@ import {
   GameMode, normalizeMode, teamOf, sameTeam, pickIsland, rankTeams,
   BombType, BOMB_TYPES, DROP_TYPES, blastKnockback, knockbackLanding, GRAVITY, KNOCKBACK_RADIUS_SCALE,
   matchDurations, activeIslands, MIN_MATCH_MINUTES, MAX_MATCH_MINUTES,
+  sanitizeChat, filterProfanity, CHAT_MAX_LEN,
 } from "../index.js";
 
 test("piece catalog and rotation", () => {
@@ -195,4 +196,15 @@ test("room size: match length is clamped and split, island sets stay balanced", 
   assert.deepEqual(activeIslands(0), [0]);
   const d = scaledDurations(0.5, 4);
   assert.equal(d[MatchPhase.BUILD] + d[MatchPhase.COMBAT], 2 * 60_000);
+});
+
+test("chat: trimmed, capped, control characters stripped, profanity masked (with leet-speak)", () => {
+  assert.equal(sanitizeChat("  hello   there \u0000 "), "hello there");
+  assert.equal(sanitizeChat("x".repeat(500)).length, CHAT_MAX_LEN);
+  assert.equal(sanitizeChat(42), "");
+  assert.equal(filterProfanity("what the fuck"), "what the ****");
+  assert.equal(filterProfanity("sh1t happens"), "**** happens");
+  assert.equal(filterProfanity("nice shot, GG!"), "nice shot, GG!");
+  assert.equal(filterProfanity("shiiiit!"), "********");
+  assert.equal(filterProfanity("class assignment"), "class assignment"); // no false positive on 'ass' inside words
 });

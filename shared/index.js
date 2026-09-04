@@ -8,6 +8,7 @@ export * from "./rules/placement.js";
 export * from "./rules/scoring.js";
 export * from "./rules/teams.js";
 export * from "./rules/knockback.js";
+export * from "./rules/chat.js";
 export * from "./rules/phases.js";
 export * from "./voxel/islandSpots.js";
 export * from "./rules/throwing.js";
