@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import { WATER_LEVEL } from "@kaboom-bay/shared";
+import { theme } from "./theme.js";
 
 let sharedMaterial = null;
 function material() {
   if (sharedMaterial) return sharedMaterial;
   sharedMaterial = new THREE.ShaderMaterial({
-    uniforms: { uTime: { value: 0 }, ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog) },
+    uniforms: { uTime: { value: 0 }, uColorA: { value: new THREE.Color(0.62, 0.9, 1.0) }, uColorB: { value: new THREE.Color(1, 1, 1) }, ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog) },
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -21,6 +22,8 @@ function material() {
       }`,
     fragmentShader: `
       uniform float uTime;
+      uniform vec3 uColorA;
+      uniform vec3 uColorB;
       varying vec2 vUv;
       #include <fog_pars_fragment>
       void main() {
@@ -29,7 +32,7 @@ function material() {
         float side = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
         float rim = 1.0 - side;
         float froth = smoothstep(0.35, 0.0, vUv.y) * (0.5 + 0.5 * sin(uTime * 7.0 + vUv.x * 20.0));
-        vec3 col = mix(vec3(0.62, 0.9, 1.0), vec3(1.0), bands * 0.5 + rim * 0.6 + froth);
+        vec3 col = mix(uColorA, uColorB, bands * 0.5 + rim * 0.6 + froth);
         float alpha = (0.55 + 0.35 * bands) * smoothstep(1.0, 0.9, vUv.y) * side + rim * 0.5 + froth * 0.4;
         gl_FragColor = vec4(col, clamp(alpha, 0.0, 0.92));
         #include <fog_fragment>
@@ -40,12 +43,16 @@ function material() {
 
 /**
  * A spring on the plateau cliff, a stream across the beach and a waterfall off the rim into the sea:
- * three quads and a splash disc, one shared animated shader across all islands.
+ * three quads and a splash disc, one shared animated shader across all islands. On the volcano the same
+ * sheets carry lava (the theme's waterfall colours).
  */
 export class Waterfall {
   constructor(scene, { origin, spot }) {
     this.scene = scene;
     const mat = material();
+    const wf = theme().waterfall ?? { a: [0.62, 0.9, 1.0], b: [1, 1, 1], splash: 0xeaf9ff };
+    mat.uniforms.uColorA.value.setRGB(...wf.a);
+    mat.uniforms.uColorB.value.setRGB(...wf.b);
     const dir = new THREE.Vector3(Math.cos(spot.angle), 0, Math.sin(spot.angle));
     // spring on the cliff: a short sheet from the grass edge down onto the sand
     const cliffTop = origin.y + spot.y + 1 + 0.05, sandTop = origin.y + 5 + 0.04;
@@ -64,7 +71,7 @@ export class Waterfall {
     this.sheet = new THREE.Mesh(new THREE.PlaneGeometry(1.4, height), mat);
     this.sheet.position.set(rx + dir.x * 0.15, sandTop - height / 2 + 0.1, rz + dir.z * 0.15);
     this.sheet.rotation.y = -spot.angle + Math.PI / 2;
-    this.splash = new THREE.Mesh(new THREE.CircleGeometry(1.5, 12), new THREE.MeshBasicMaterial({ color: 0xeaf9ff, transparent: true, opacity: 0.55, depthWrite: false }));
+    this.splash = new THREE.Mesh(new THREE.CircleGeometry(1.5, 12), new THREE.MeshBasicMaterial({ color: wf.splash, transparent: true, opacity: 0.55, depthWrite: false }));
     this.splash.rotation.x = -Math.PI / 2;
     this.splash.position.set(rx + dir.x * 0.6, WATER_LEVEL + 0.06, rz + dir.z * 0.6);
     for (const m of [this.spring, this.stream, this.sheet, this.splash]) { m.renderOrder = 3; scene.add(m); }

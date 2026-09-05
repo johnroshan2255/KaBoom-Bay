@@ -1,6 +1,7 @@
 export * from "./constants.js";
 export * from "./voxel/VoxelGrid.js";
 export * from "./voxel/islandGen.js";
+export * from "./voxel/arena.js";
 export * from "./rules/blast.js";
 export * from "./rules/ballistics.js";
 export * from "./rules/pieces.js";
@@ -10,6 +11,7 @@ export * from "./rules/teams.js";
 export * from "./rules/knockback.js";
 export * from "./rules/chat.js";
 export * from "./rules/phases.js";
+export * from "./rules/maps.js";
 export * from "./voxel/islandSpots.js";
 export * from "./rules/throwing.js";
 export * from "./physics/terrainColliders.js";

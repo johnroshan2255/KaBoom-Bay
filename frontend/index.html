@@ -13,20 +13,73 @@
       @font-face { font-family: "Press Start 2P"; font-style: normal; font-weight: 400; font-display: swap; src: url("assets/fonts/PressStart2P.woff2") format("woff2"); }
       @font-face { font-family: "Nunito"; font-style: normal; font-weight: 600 800; font-display: swap; src: url("assets/fonts/Nunito.woff2") format("woff2"); }
       /* user-select / touch-callout off: CrazyGames mobile requirement (no text selection or magnifier on long press) */
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #1ec8e6; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      /* 100dvh: on Android Chrome a percentage height stops at the small viewport, so hiding the URL bar left a strip of page background under the canvas */
+      html, body { margin: 0; height: 100%; height: var(--vh, 100dvh); overflow: hidden; background: #0f3446; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
       input, textarea { user-select: text; -webkit-user-select: text; }
-      #game { width: 100%; height: 100%; display: block; }
+      /* pinned to the visual viewport: with 100% height a retracting mobile toolbar left a strip of page background under the canvas */
+      #game { position: fixed; top: 0; left: 0; width: 100%; height: 100%; height: var(--vh, 100dvh); display: block; }
       /* HUD above the touch controls layer (z 1) so its buttons win over the first-person look zone */
-      #ui { position: fixed; inset: 0; z-index: 2; pointer-events: none; font-family: Nunito, system-ui, sans-serif; }
+      #ui { position: fixed; top: 0; left: 0; width: 100%; height: 100%; height: var(--vh, 100dvh); z-index: 2; pointer-events: none; font-family: Nunito, system-ui, sans-serif; }
       #ui .px { font-family: "Press Start 2P", monospace; }
       #rotate { display:none; position:fixed; inset:0; z-index:10; background:#0f3446; color:#ffd23f; font-family:"Press Start 2P", monospace; font-size:14px; line-height:2; text-align:center; place-items:center; padding:24px; }
       @media (orientation: portrait) and (max-width: 900px) { #rotate { display:grid; } }
+      /* loading screen: in the page itself so it shows before the scripts arrive; hud.showLoading() reuses it */
+      #loading { position:fixed; top:0; left:0; width:100%; height:100%; height:var(--vh, 100dvh); z-index:9; display:grid; place-items:center; overflow:hidden; color:#f3f7f9; font-family:"Press Start 2P", monospace; text-align:center; transition:opacity .35s; image-rendering:pixelated;
+        background: repeating-conic-gradient(rgba(3,20,32,.35) 0 25%, transparent 0 50%) 0 0 / 6px 6px, radial-gradient(ellipse at 50% 40%, #16506a, #082130 70%); }
+      #loading.hide { opacity:0; pointer-events:none; }
+      #loading[hidden] { display:none; }
+      #loading .sea { position:absolute; left:0; right:0; bottom:0; height:22%; background:#1fbde6; box-shadow: inset 0 6px 0 #6fe3ff; }
+      #loading .sea::before { content:""; position:absolute; left:-64px; right:0; top:-8px; height:8px; background: repeating-linear-gradient(90deg, #6fe3ff 0 16px, transparent 16px 32px); animation: waves 1.4s steps(4) infinite; }
+      #loading .sea::after { content:""; position:absolute; left:0; right:0; top:22px; height:6px; background: repeating-linear-gradient(90deg, rgba(255,255,255,.35) 0 24px, transparent 24px 64px); animation: waves 2.6s steps(6) infinite reverse; }
+      @keyframes waves { to { transform: translateX(64px); } }
+      #loading .box { position:relative; display:grid; justify-items:center; gap:14px; padding:0 16px 40px; }
+      #loading svg { width:96px; height:96px; animation: bob 1.1s ease-in-out infinite; filter: drop-shadow(0 8px 0 rgba(3,20,32,.45)); }
+      @keyframes bob { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-8px) rotate(4deg); } }
+      #loading .spark { animation: spark .25s steps(2) infinite; }
+      @keyframes spark { to { opacity:.25; } }
+      #loading h1 { margin:0; font-size:26px; line-height:1.3; color:#ffd23f; letter-spacing:1px; text-shadow: 3px 3px 0 #b53d1a, 6px 6px 0 #062a3a; }
+      #loading .bar { width:min(320px, 70vw); height:18px; background:#082130; border:3px solid #f1d48e; box-shadow: 0 4px 0 #6d4320; overflow:hidden; }
+      #loading .bar i { display:block; height:100%; width:40%; background: repeating-linear-gradient(90deg, #ffd23f 0 12px, #ff9a3d 12px 24px); animation: slide 1.1s linear infinite; }
+      @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+      #loading .status { font-size:10px; color:#a9d6e6; line-height:1.8; min-height:18px; }
+      #loading .status::after { content:"_"; animation: blink .8s steps(2) infinite; }
+      @keyframes blink { to { opacity:0; } }
+      #loading .tip { font-size:8px; color:#ffd23f; line-height:1.9; max-width:min(520px, 86vw); min-height:30px; text-shadow:1px 1px 0 rgba(0,0,0,.5); }
+      @media (max-height: 500px) { #loading svg { width:56px; height:56px; } #loading h1 { font-size:16px; } #loading .box { gap:8px; padding-bottom:24px; } #loading .bar { height:12px; } #loading .tip { min-height:0; } }
     </style>
   </head>
   <body>
     <canvas id="game"></canvas>
     <div id="ui"></div>
     <div id="rotate">Rotate your device<br><small style="font-size:9px;color:#a9d6e6">KaBoom Bay plays in landscape</small></div>
+    <div id="loading" role="status" aria-live="polite">
+      <div class="sea"></div>
+      <div class="box">
+        <svg viewBox="0 0 16 16" shape-rendering="crispEdges" aria-hidden="true">
+          <rect class="spark" x="11" y="0" width="2" height="2" fill="#ffd23f"/><rect class="spark" x="13" y="1" width="1" height="1" fill="#ff6b3d"/><rect x="10" y="2" width="2" height="1" fill="#ff6b3d"/>
+          <rect x="9" y="3" width="1" height="2" fill="#d8c39a"/><rect x="7" y="4" width="4" height="2" fill="#8a8f9c"/>
+          <rect x="5" y="6" width="8" height="1" fill="#3b414d"/><rect x="4" y="7" width="10" height="1" fill="#3b414d"/><rect x="3" y="8" width="12" height="4" fill="#3b414d"/><rect x="4" y="12" width="10" height="1" fill="#3b414d"/><rect x="5" y="13" width="8" height="1" fill="#2a2f38"/><rect x="6" y="14" width="6" height="1" fill="#2a2f38"/>
+          <rect x="5" y="8" width="2" height="2" fill="#9aa3b4"/><rect x="4" y="9" width="1" height="2" fill="#9aa3b4"/>
+        </svg>
+        <h1>KaBoom Bay</h1>
+        <div class="bar"><i></i></div>
+        <div class="status" data-status>LOADING</div>
+        <div class="tip" data-tip>Build your island. Bomb your rivals.</div>
+      </div>
+    </div>
+    <script>
+      // --vh: the real visible height. Phones change it when the browser goes full screen, hides its URL bar or
+      // rotates; every full-screen layer sizes from it so nothing is left off screen after the jump.
+      (function () {
+        var root = document.documentElement;
+        var apply = function () { root.style.setProperty("--vh", (window.visualViewport ? window.visualViewport.height : window.innerHeight) + "px"); };
+        apply();
+        window.addEventListener("resize", apply);
+        window.addEventListener("orientationchange", function () { apply(); setTimeout(apply, 300); });
+        document.addEventListener("fullscreenchange", function () { apply(); setTimeout(apply, 300); });
+        if (window.visualViewport) window.visualViewport.addEventListener("resize", apply);
+      })();
+    </script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

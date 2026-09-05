@@ -17,16 +17,17 @@ export const bombReturnedBonus = () => COINS_BOMB_RETURNED;
 export const selfDestructPenalty = () => COINS_SELF_DESTRUCT_PENALTY;
 
 /**
- * Ranks players by coins (desc). Ties share a rank.
+ * Ranks players by `key` (desc; coins by default, holdMs in capture the flag), coins breaking ties. Ties share a rank.
  * @param {Array<{ coins:number }>} players
  * @returns {Array<{ rank:number } & typeof players[0]>}
  */
-export function rankPlayers(players) {
-  const sorted = [...players].sort((a, b) => b.coins - a.coins);
+export function rankPlayers(players, key = "coins") {
+  const score = (p) => p[key] ?? 0;
+  const sorted = [...players].sort((a, b) => score(b) - score(a) || b.coins - a.coins);
   let rank = 0, prev = null;
   return sorted.map((p, i) => {
-    if (prev === null || p.coins < prev) rank = i + 1;
-    prev = p.coins;
+    if (prev === null || score(p) < prev) rank = i + 1;
+    prev = score(p);
     return { ...p, rank };
   });
 }

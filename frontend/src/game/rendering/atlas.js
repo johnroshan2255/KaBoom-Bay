@@ -1,10 +1,12 @@
 import * as THREE from "three";
 import { mulberry32 } from "@kaboom-bay/shared";
+import { themeFor } from "./theme.js";
 
 /**
- * Procedural 16x16 pixel-art tiles drawn once into a canvas atlas at startup.
+ * Procedural 16x16 pixel-art tiles drawn once per map into a canvas atlas.
  * Nearest filtering keeps the texels crisp, giving every block sub-voxel detail
  * (grass tufts, moss, cracks, planks) without shipping any image files.
+ * Terrain tiles take their colours from the map's theme palette (`P`); building pieces look the same on every map.
  */
 export const TILE = Object.freeze({
   GRASS_TOP: 0, GRASS_SIDE: 1, DIRT: 2, STONE: 3, STONE_MOSS: 4, SAND: 5, WOOD_SIDE: 6, WOOD_TOP: 7,
@@ -18,7 +20,7 @@ const hex = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
 const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
 const css = ([r, g, b]) => `rgb(${r | 0},${g | 0},${b | 0})`;
 
-function painter(ctx, ox, rand) {
+function painter(ctx, ox, rand, P) {
   const px = (x, y, color) => { ctx.fillStyle = css(color); ctx.fillRect(ox + x, y, 1, 1); };
   const fill = (base, jitter) => {
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
@@ -27,53 +29,60 @@ function painter(ctx, ox, rand) {
     }
   };
   const speckle = (color, count) => { for (let i = 0; i < count; i++) px((rand() * 16) | 0, (rand() * 16) | 0, color); };
-  return { px, fill, speckle };
+  return { px, fill, speckle, P };
 }
 
 const drawers = {
-  [TILE.GRASS_TOP](p) { p.fill(hex(0x6cd15a), 0.015); p.speckle(hex(0x83de6c), 5); p.speckle(hex(0x5ec24f), 3); },
+  [TILE.GRASS_TOP](p) { const { P } = p; p.fill(hex(P.grass), 0.015); p.speckle(hex(P.grassLight), 5); p.speckle(hex(P.grassDark), 3); },
   // grass side: a thick green cap with a soft lower edge over green-grey stone (the reference's cliff look)
   [TILE.GRASS_SIDE](p, rand) {
+    const { P } = p;
     drawers[TILE.STONE](p, rand);
-    for (let x = 0; x < 16; x++) { const depth = 5 + ((rand() * 2) | 0); for (let y = 0; y < depth; y++) p.px(x, y, hex(y >= depth - 1 ? 0x57b64b : 0x6cd15a)); }
+    for (let x = 0; x < 16; x++) { const depth = 5 + ((rand() * 2) | 0); for (let y = 0; y < depth; y++) p.px(x, y, hex(y >= depth - 1 ? P.grassCapEdge : P.grassCap)); }
   },
-  [TILE.DIRT](p) { p.fill(hex(0x8f5f38), 0.025); p.speckle(hex(0x7d5030), 5); },
+  [TILE.DIRT](p) { const { P } = p; p.fill(hex(P.dirt), 0.025); p.speckle(hex(P.dirtDark), 5); },
   // stone comes in two tiles so seams only appear every other block: the cliffs read as 2x2 bricks
   [TILE.STONE](p, rand) {
-    p.fill(hex(0x86a892), 0.015);
-    let x = (rand() * 16) | 0, y = (rand() * 8) | 0; for (let k = 0; k < 4; k++) { p.px(x & 15, y & 15, hex(0x789a84)); rand() < 0.5 ? x++ : y++; }
+    const { P } = p;
+    p.fill(hex(P.stone), 0.015);
+    let x = (rand() * 16) | 0, y = (rand() * 8) | 0; for (let k = 0; k < 4; k++) { p.px(x & 15, y & 15, hex(P.stoneDark)); rand() < 0.5 ? x++ : y++; }
   },
   [TILE.STONE_SEAM](p, rand) {
+    const { P } = p;
     drawers[TILE.STONE](p, rand);
-    for (let i = 0; i < 16; i++) { p.px(i, 15, hex(0x6a8a76)); p.px(i, 14, hex(0x759680)); p.px(0, i, hex(0x6a8a76)); p.px(1, i, hex(0x759680)); }
+    for (let i = 0; i < 16; i++) { p.px(i, 15, hex(P.stoneSeam)); p.px(i, 14, hex(P.stoneSeam2)); p.px(0, i, hex(P.stoneSeam)); p.px(1, i, hex(P.stoneSeam2)); }
   },
   [TILE.STONE_MOSS](p, rand) {
+    const { P } = p;
     drawers[TILE.STONE](p, rand);
-    for (let i = 0; i < 3; i++) { const cx = rand() * 16, cy = rand() * 10, r = 2 + rand() * 2.5; for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) if (Math.hypot(xx - cx, yy - cy) < r) p.px(xx, yy, hex(0x66c65a)); }
+    for (let i = 0; i < 3; i++) { const cx = rand() * 16, cy = rand() * 10, r = 2 + rand() * 2.5; for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) if (Math.hypot(xx - cx, yy - cy) < r) p.px(xx, yy, hex(P.moss)); }
   },
   [TILE.GRASS_CAP](p, rand) { drawers[TILE.STONE_SEAM](p, rand); },
-  [TILE.LEAF_AUTUMN](p) { p.fill(hex(0xb8622a), 0.03); p.speckle(hex(0xd47a35), 9); p.speckle(hex(0x9a4d1f), 6); p.speckle(hex(0xe89a4a), 3); },
+  [TILE.LEAF_AUTUMN](p) { const { P } = p; p.fill(hex(P.autumn), 0.03); p.speckle(hex(P.autumnLight), 9); p.speckle(hex(P.autumnDark), 6); p.speckle(hex(P.autumnHi), 3); },
   [TILE.CARVED](p) {
-    p.fill(hex(0x86a892), 0.015);
-    const d = hex(0x668a74);
+    const { P } = p;
+    p.fill(hex(P.carved), 0.015);
+    const d = hex(P.carvedDark);
     for (let i = 1; i < 15; i++) { p.px(i, 1, d); p.px(i, 14, d); p.px(1, i, d); p.px(14, i, d); } // frame
     for (let i = 4; i < 12; i++) { p.px(i, 4, d); p.px(4, i, d); } // meander: two nested corners
     for (let i = 6; i < 12; i++) { p.px(11, i, d); p.px(i, 11, d); }
     p.px(7, 7, d); p.px(8, 7, d); p.px(7, 8, d); p.px(8, 8, d);
   },
-  [TILE.MUSHROOM](p) { p.fill(hex(0xe04a3a), 0.02); for (const [x, y] of [[3, 3], [10, 4], [6, 10], [12, 11], [2, 12]]) { p.px(x, y, hex(0xfff3e6)); p.px(x + 1, y, hex(0xfff3e6)); p.px(x, y + 1, hex(0xfff3e6)); p.px(x + 1, y + 1, hex(0xfff3e6)); } },
-  [TILE.STEM](p) { p.fill(hex(0xf1e4c8), 0.02); for (let y = 0; y < 16; y++) p.px(0, y, hex(0xd9c9a6)); },
+  [TILE.MUSHROOM](p) { const { P } = p; p.fill(hex(P.mushroom), 0.02); for (const [x, y] of [[3, 3], [10, 4], [6, 10], [12, 11], [2, 12]]) { p.px(x, y, hex(P.mushroomSpot)); p.px(x + 1, y, hex(P.mushroomSpot)); p.px(x, y + 1, hex(P.mushroomSpot)); p.px(x + 1, y + 1, hex(P.mushroomSpot)); } },
+  [TILE.STEM](p) { const { P } = p; p.fill(hex(P.stem), 0.02); for (let y = 0; y < 16; y++) p.px(0, y, hex(P.stemEdge)); },
   [TILE.PLAIN](p) { p.fill(hex(0xffffff), 0); },
-  [TILE.SAND](p) { p.fill(hex(0xf1d48e), 0.02); p.speckle(hex(0xe6c47a), 6); },
+  [TILE.SAND](p) { const { P } = p; p.fill(hex(P.sand), 0.02); p.speckle(hex(P.sandDark), 6); },
   [TILE.WOOD_SIDE](p, rand) {
-    p.fill(hex(0x8c5a2e), 0.02);
-    for (let x = 3; x < 16; x += 6) for (let y = 0; y < 16; y++) if (rand() < 0.8) p.px(x, y, hex(0x734a25));
+    const { P } = p;
+    p.fill(hex(P.woodSide), 0.02);
+    for (let x = 3; x < 16; x += 6) for (let y = 0; y < 16; y++) if (rand() < 0.8) p.px(x, y, hex(P.woodSideDark));
   },
   [TILE.WOOD_TOP](p, rand) {
-    p.fill(hex(0xa9743f), 0.05);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (((d * 1.6) | 0) % 2 === 0) p.px(x, y, hex(0x8c5a2e)); }
+    const { P } = p;
+    p.fill(hex(P.woodTop), 0.05);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (((d * 1.6) | 0) % 2 === 0) p.px(x, y, hex(P.woodTopDark)); }
   },
-  [TILE.LEAF](p) { p.fill(hex(0x4cb955), 0.025); p.speckle(hex(0x6fd36a), 8); p.speckle(hex(0x3a9a47), 6); },
+  [TILE.LEAF](p) { const { P } = p; p.fill(hex(P.leaf), 0.025); p.speckle(hex(P.leafLight), 8); p.speckle(hex(P.leafDark), 6); },
   [TILE.PLANK](p, rand) {
     p.fill(hex(0xd19a5a), 0.05);
     for (let y = 0; y < 16; y += 4) { for (let x = 0; x < 16; x++) p.px(x, y, hex(0x9c6a35)); p.px((rand() * 16) | 0, y + 2, hex(0x9c6a35)); }
@@ -98,19 +107,23 @@ const drawers = {
   },
 };
 
-let cached = null;
-export function getAtlas() {
-  if (cached) return cached;
+const cache = new Map(); // map id -> { texture, canvas }
+/** The tile atlas for `map` (GameMap); drawn on first use and kept for the session. */
+export function getAtlas(map) {
+  const t = themeFor(map);
+  const hit = cache.get(t.id);
+  if (hit) return hit;
   const canvas = document.createElement("canvas");
   canvas.width = TILE_PX * TILE_COUNT;
   canvas.height = TILE_PX;
   const ctx = canvas.getContext("2d");
-  for (let i = 0; i < TILE_COUNT; i++) drawers[i]?.(painter(ctx, i * TILE_PX, mulberry32(1000 + i)), mulberry32(2000 + i));
+  for (let i = 0; i < TILE_COUNT; i++) drawers[i]?.(painter(ctx, i * TILE_PX, mulberry32(1000 + i), t.palette), mulberry32(2000 + i));
   const texture = new THREE.CanvasTexture(canvas);
   texture.magFilter = THREE.NearestFilter;
   texture.minFilter = THREE.NearestFilter;
   texture.generateMipmaps = false;
   texture.colorSpace = THREE.SRGBColorSpace;
-  cached = { texture, canvas };
-  return cached;
+  const entry = { texture, canvas };
+  cache.set(t.id, entry);
+  return entry;
 }

@@ -16,7 +16,12 @@ import {
   BombStatus,
   Message,
   WATER_LEVEL,
-  ISLAND_SIZE,
+  ARENA_INDEX,
+  BLAST_DAMAGE,
+  COINS_PER_TERRAIN_BLOCK,
+  GameType,
+  KNOCKBACK_RADIUS_SCALE,
+  MatchPhase,
   activeIslands,
   bombReturnedBonus,
   canFight,
@@ -33,6 +38,7 @@ import {
 import { BombState } from "../schema/BayState.js";
 import { encodeDiff } from "./islands.js";
 import { groundAt, placeAtSpawn } from "./players.js";
+import { holdsFlag, killHero, queueBridgeRebuild } from "./match.js";
 import { BOMB_PICKUP_RADIUS as PICKUP } from "@kaboom-bay/shared";
 
 /** World position where island `i`'s bomb waits (in front of the hero on the beach). */
@@ -73,7 +79,7 @@ function takeSelectedType(player) {
 /** Puts a fresh, unarmed bomb of the player's selected type in their hands. */
 export function giveBomb(room, sessionId) {
   const player = room.state.players.get(sessionId);
-  if (!player || !canFight(room.state.phase) || holding(room, sessionId)) return null;
+  if (!player || player.dead || holdsFlag(room, sessionId) || !canFight(room.state.phase) || holding(room, sessionId)) return null;
   const id = `b${room.nextBombId++}`;
   const p = heldPosition(player);
   const type = takeSelectedType(player);
@@ -128,11 +134,12 @@ export function throwBomb(room, sessionId, msg) {
 }
 
 /** A defender picks up a live bomb resting on their island. */
-export function grabBomb(room, sessionId, id) {
+export function grabBomb(room, sessionId, id, anyIsland = false) {
   if (!canFight(room.state.phase) || typeof id !== "string") return false;
   const player = room.state.players.get(sessionId);
   const bomb = room.state.bombs.get(id);
-  if (!player || !bomb || bomb.status !== BombStatus.RESTING || bomb.islandIndex !== player.islandIndex) return false;
+  if (!player || player.dead || holdsFlag(room, sessionId) || !bomb || bomb.status !== BombStatus.RESTING) return false;
+  if (!anyIsland && room.state.game !== GameType.CTF && bomb.islandIndex !== player.islandIndex) return false;
   if (Math.hypot(bomb.x - player.x, bomb.z - player.z) > PICKUP + 0.5) return false;
   const held = holding(room, sessionId);
   if (held) {
@@ -153,7 +160,7 @@ export function grabBomb(room, sessionId, id) {
   return true;
 }
 
-function removeBomb(room, id) {
+export function removeBomb(room, id) {
   room.physics.removeBomb(id);
   room.state.bombs.delete(id);
   room.bombRecords.delete(id);
@@ -242,17 +249,28 @@ function explode(room, id, bomb, now) {
 
   const hitIslands = [];
   const coinsBy = {};
-  const half = ISLAND_SIZE / 2 + radius;
   const inPlay = new Set(activeIslands(state.islandCount));
+  if (state.game === GameType.CTF && room.islands[ARENA_INDEX]) inPlay.add(ARENA_INDEX);
   for (const island of room.islands) {
-    if (!inPlay.has(island.index)) continue;
+    if (!island || !inPlay.has(island.index)) continue;
     const c = islandCenter(island.index);
-    if (Math.abs(pos.x - c.x) > half || Math.abs(pos.z - c.z) > half) continue;
+    if (Math.abs(pos.x - c.x) > island.grid.sizeX / 2 + radius || Math.abs(pos.z - c.z) > island.grid.sizeZ / 2 + radius) continue;
     const o = islandOrigin(island.index);
     const { removed } = resolveBlast(island.grid, pos.x - o.x, pos.y - o.y, pos.z - o.z, radius);
     if (!removed.length) continue;
     hitIslands.push(island.index);
     for (const { index } of removed) state.terrainDiffs.push(encodeDiff(island.index, index));
+    if (island.index === ARENA_INDEX) {
+      // bridges grow back; the attacker earns a coin per plank of a rival's bridge
+      queueBridgeRebuild(room, removed, now);
+      room.physics.rebuildIsland(ARENA_INDEX);
+      const attacker = thrower && state.players.get(thrower);
+      if (attacker) {
+        const coins = removed.filter(({ index }) => island.owner[index] !== 255 && !sameTeam(island.owner[index], attacker.islandIndex, state.mode)).length * COINS_PER_TERRAIN_BLOCK;
+        if (coins) { attacker.coins += coins; coinsBy[thrower] = (coinsBy[thrower] ?? 0) + coins; }
+      }
+      continue;
+    }
     // pieces with no cells left are gone
     for (const [pieceId, cells] of island.pieces) {
       if (cells.every(([x, y, z]) => !island.grid.isSolid(x, y, z))) {
@@ -285,7 +303,7 @@ function explode(room, id, bomb, now) {
   }
 
   room.physics.applyBlastImpulse(pos, radius, 40);
-  knockHeroes(room, pos, radius, now);
+  knockHeroes(room, pos, radius, now, thrower);
   room.broadcast(Message.BOMB_EXPLODED, { ...pos, radius, type: bomb.type, islands: hitIslands, coinsBy });
 
   // cluster bombs split into bomblets that pop a moment later
@@ -307,11 +325,19 @@ function explode(room, id, bomb, now) {
  * and move bots (and disconnected players) straight to where they would land, or back to their spawn
  * if that is in the water.
  */
-function knockHeroes(room, pos, radius, now) {
-  for (const [key, p] of room.state.players) {
+function knockHeroes(room, pos, radius, now, thrower = null) {
+  for (const [key, p] of [...room.state.players.entries()]) {
+    if (p.dead) continue;
     const v = blastKnockback(p, pos, radius);
     if (!v) continue;
     room.knockedAt.set(key, now);
+    // blast damage: full at the centre, 15% at the knockback edge; a dead hero drops out until the respawn
+    if (room.state.phase === MatchPhase.COMBAT && Math.abs(p.y - pos.y) < radius * 1.5) {
+      const reach = radius * KNOCKBACK_RADIUS_SCALE, d = Math.hypot(p.x - pos.x, p.z - pos.z);
+      const dmg = Math.round(BLAST_DAMAGE * (radius / BOMB_BLAST_RADIUS) * (1 - 0.85 * Math.min(1, d / reach)));
+      p.hp = Math.max(0, p.hp - dmg);
+      if (p.hp === 0) { killHero(room, key, p, thrower, now); continue; }
+    }
     if (p.isBot || !p.connected) {
       const land = knockbackLanding(p, v, GRAVITY);
       const y = groundAt(room, p.islandIndex, land.x, land.z);

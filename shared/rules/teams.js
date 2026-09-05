@@ -44,21 +44,22 @@ export function pickIsland(takenIslands, mode) {
  * @param {Array<{ islandIndex:number, coins:number }>} players
  * @returns {Array<{ team:number, coins:number, members:Array, rank:number }>}
  */
-export function rankTeams(players, mode) {
+export function rankTeams(players, mode, key = "coins") {
   const byTeam = new Map();
   for (const p of players) {
     const team = teamOf(p.islandIndex, mode);
-    const t = byTeam.get(team) ?? { team, coins: 0, members: [] };
+    const t = byTeam.get(team) ?? { team, coins: 0, score: 0, members: [] };
     t.coins += p.coins;
+    t.score += p[key] ?? 0;
     t.members.push(p);
     byTeam.set(team, t);
   }
-  const sorted = [...byTeam.values()].sort((a, b) => b.coins - a.coins || a.team - b.team);
+  const sorted = [...byTeam.values()].sort((a, b) => b.score - a.score || b.coins - a.coins || a.team - b.team);
   let rank = 0, prev = null;
   return sorted.map((t, i) => {
-    if (prev === null || t.coins < prev) rank = i + 1;
-    prev = t.coins;
-    t.members.sort((a, b) => b.coins - a.coins || a.islandIndex - b.islandIndex);
-    return { ...t, rank };
+    if (prev === null || t.score < prev) rank = i + 1;
+    prev = t.score;
+    t.members.sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0) || b.coins - a.coins || a.islandIndex - b.islandIndex);
+    return { ...t, [key]: t.score, rank };
   });
 }

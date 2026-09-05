@@ -1,13 +1,13 @@
 import * as THREE from "three";
-import { GRAVITY, HERO_SPEED, MOVE_SEND_HZ, Message, WATER_LEVEL } from "@kaboom-bay/shared";
+import { GRAVITY, HERO_JUMP_SPEED, HERO_SPEED, MOVE_SEND_HZ, Message, WATER_LEVEL } from "@kaboom-bay/shared";
 
 // physical key codes: the same keys move on QWERTY (WASD) and AZERTY (ZQSD); arrows always work
 const KEYS = { KeyW: "f", ArrowUp: "f", KeyS: "b", ArrowDown: "b", KeyA: "l", ArrowLeft: "l", KeyD: "r", ArrowRight: "r" };
 
 /**
  * Moves the local hero over their island's voxel terrain: WASD / arrows / virtual joystick relative
- * to the camera, one-block step-ups, no walking off the island. Sends MOVE to the server at 15 Hz.
- * `moveTo()` auto-runs to a point (tap-to-grab on touch / third person).
+ * to the camera, one-block step-ups, a steerable jump (Space / JUMP) that clears two blocks, no walking
+ * off the island. Sends MOVE to the server at 15 Hz. `moveTo()` auto-runs to a point (tap-to-grab).
  */
 export class HeroController {
   constructor({ island, net, start }) {
@@ -20,10 +20,14 @@ export class HeroController {
     this.auto = null;
     this.moving = false;
     this._lastSent = 0;
-    this._sent = { x: Infinity, z: Infinity, yaw: Infinity }; // Infinity, not NaN: NaN never compares "changed"
+    this._sent = { x: Infinity, y: Infinity, z: Infinity, yaw: Infinity }; // Infinity, not NaN: NaN never compares "changed"
     this.enabled = true;
-    this.vel = new THREE.Vector3(); // knockback flight velocity while airborne
+    this.vel = new THREE.Vector3(); // knockback / jump velocity while airborne
     this.airborne = false;
+    this.jumping = false; // airborne by choice: still steerable, lands on the first ledge within a step
+    this.dead = false; // bombed: no input until the server respawns us
+    this.extraGrids = []; // capture the flag: the arena and the other islands are walkable too
+    this.tether = null; // { x, z, r }: holding a contested flag keeps us within r of the other holders
     this.fallen = false; // in the water, waiting for the server to respawn us
     this.onFall = null; // (pos) => void
 
@@ -93,7 +97,51 @@ export class HeroController {
     if (this.fallen) return;
     this.vel.set(vx, vy, vz);
     this.airborne = true;
+    this.jumping = false;
     this.auto = null;
+  }
+
+  /** Space / JUMP: hop about two blocks high; walking input keeps steering in the air. Returns false when already airborne. */
+  jump() {
+    if (!this.enabled || this.fallen || this.dead || this.airborne) return false;
+    this.vel.set(0, HERO_JUMP_SPEED, 0);
+    this.airborne = true;
+    this.jumping = true;
+    this.auto = null;
+    return true;
+  }
+
+  /** Start falling (walked off an edge, or the ground was blown away). Steerable like a jump; a splash ends it. */
+  _fall() {
+    this.vel.set(0, 0, 0);
+    this.airborne = true;
+    this.jumping = true;
+    this.auto = null;
+  }
+
+  /** May we stand at (nx, nz)? Beyond the tug-of-war tether only if it brings us back in. */
+  _tetherOk(nx, nz) {
+    const t = this.tether;
+    if (!t) return true;
+    const dNew = Math.hypot(nx - t.x, nz - t.z), dOld = Math.hypot(this.pos.x - t.x, this.pos.z - t.z);
+    return dNew <= t.r || dNew <= dOld;
+  }
+
+  /** Walking direction from keys + joystick, camera-relative; [0, 0] when idle. */
+  _inputDir(cameraYaw) {
+    if (!this.enabled) return [0, 0];
+    let ix = this.joy.x, iz = this.joy.y;
+    if (this.keys.has("f")) iz += 1;
+    if (this.keys.has("b")) iz -= 1;
+    if (this.keys.has("l")) ix -= 1;
+    if (this.keys.has("r")) ix += 1;
+    if (!ix && !iz) return [0, 0];
+    const f = { x: Math.sin(cameraYaw), z: Math.cos(cameraYaw) };
+    const r = { x: -Math.cos(cameraYaw), z: Math.sin(cameraYaw) }; // forward x up (Y-up, right-handed): screen right
+    let wx = f.x * iz + r.x * ix, wz = f.z * iz + r.z * ix;
+    const len = Math.hypot(wx, wz);
+    if (len > 1) { wx /= len; wz /= len; }
+    return [wx, wz];
   }
 
   /** Server put us back on the beach after a fall. */
@@ -102,54 +150,76 @@ export class HeroController {
     if (Number.isFinite(yaw)) this.yaw = yaw;
     this.vel.set(0, 0, 0);
     this.airborne = false;
+    this.jumping = false;
     this.fallen = false;
+    this.dead = false;
     this.enabled = true;
-    this._sent = { x: Infinity, z: Infinity, yaw: Infinity };
+    this._sent = { x: Infinity, y: Infinity, z: Infinity, yaw: Infinity };
   }
+
+  /** Grids the hero may stand on: their island first, then (capture the flag) the arena and rival islands. */
+  _grids() { return this.extraGrids.length ? [this.island, ...this.extraGrids] : [this.island]; }
 
   /** Feet height where something falling from the sky lands at (nx, nz), or null over open water. */
   groundRaw(nx, nz) {
-    const { grid, origin } = this.island;
-    const feet = grid.surfaceAt(Math.floor(nx - origin.x), Math.floor(nz - origin.z), grid.sizeY - 1);
-    return feet < 0 ? null : origin.y + feet;
+    for (const { grid, origin } of this._grids()) {
+      const gx = Math.floor(nx - origin.x), gz = Math.floor(nz - origin.z);
+      if (!grid.inBounds(gx, 0, gz)) continue;
+      const feet = grid.surfaceAt(gx, gz, grid.sizeY - 1);
+      if (feet >= 0) return origin.y + feet;
+    }
+    return null;
   }
 
   /** Feet height if (nx, nz) is walkable from the current height (one block up, canopies overhead ignored), else null. */
   groundAt(nx, nz) {
-    const { grid, origin } = this.island;
-    const feet = grid.surfaceAt(Math.floor(nx - origin.x), Math.floor(nz - origin.z), Math.floor(this.pos.y - origin.y + 1e-3));
-    return feet < 0 ? null : origin.y + feet;
+    for (const { grid, origin } of this._grids()) {
+      const gx = Math.floor(nx - origin.x), gz = Math.floor(nz - origin.z);
+      if (!grid.inBounds(gx, 0, gz)) continue;
+      const feet = grid.surfaceAt(gx, gz, Math.floor(this.pos.y - origin.y + 1e-3));
+      if (feet >= 0) return origin.y + feet;
+    }
+    return null;
   }
 
   update(dt, cameraYaw, faceYaw = null) {
+    if (this.dead) return;
     if (this.airborne) {
+      if (this.jumping) {
+        // steer in the air; a column counts as passable when it has a surface no higher than a step above our current height,
+        // so the top of a two-block wall opens up near the apex
+        const [wx, wz] = this._inputDir(cameraYaw);
+        if (wx || wz) {
+          const step = HERO_SPEED * dt;
+          const nx = this.pos.x + wx * step, nz = this.pos.z + wz * step;
+          // in the air a column is passable when it has a surface within a step, or nothing at all (we keep falling over it)
+          if ((this.groundAt(nx, this.pos.z) !== null || this.groundRaw(nx, this.pos.z) === null) && this._tetherOk(nx, this.pos.z)) this.pos.x = nx;
+          if ((this.groundAt(this.pos.x, nz) !== null || this.groundRaw(this.pos.x, nz) === null) && this._tetherOk(this.pos.x, nz)) this.pos.z = nz;
+          if (faceYaw === null) this.yaw = Math.atan2(wx, wz);
+        }
+      }
       this.vel.y += GRAVITY * dt;
       this.pos.addScaledVector(this.vel, dt);
-      const g = this.groundRaw(this.pos.x, this.pos.z);
+      const g = this.jumping ? this.groundAt(this.pos.x, this.pos.z) : this.groundRaw(this.pos.x, this.pos.z);
       if (this.vel.y <= 0 && g !== null && this.pos.y <= g) {
-        this.pos.y = g; // landed back on the island
+        this.pos.y = g; // landed (a jump also "grabs" a ledge up to one step above)
         this.airborne = false;
+        this.jumping = false;
         this.vel.set(0, 0, 0);
       } else if (this.pos.y < WATER_LEVEL - 0.4) {
         this.airborne = false;
+        this.jumping = false;
         this.fallen = true;
         this.enabled = false;
         this.onFall?.(this.pos.clone());
       }
+      if (faceYaw !== null) this.yaw = faceYaw;
       this.moving = true;
       this._send();
       return;
     }
     if (this.fallen) return;
-    let ix = 0, iz = 0;
-    if (this.enabled) {
-      if (this.keys.has("f")) iz += 1;
-      if (this.keys.has("b")) iz -= 1;
-      if (this.keys.has("l")) ix -= 1;
-      if (this.keys.has("r")) ix += 1;
-      ix += this.joy.x;
-      iz += this.joy.y;
-    }
+    const [ix, iz] = this._inputDir(cameraYaw);
     let wx = 0, wz = 0;
     if (this.auto) {
       const d = Math.hypot(this.auto.target.x - this.pos.x, this.auto.target.z - this.pos.z);
@@ -162,12 +232,7 @@ export class HeroController {
         wx = dx / wd; wz = dz / wd;
       }
     } else if (ix || iz) {
-      const f = { x: Math.sin(cameraYaw), z: Math.cos(cameraYaw) };
-      const r = { x: Math.cos(cameraYaw), z: -Math.sin(cameraYaw) };
-      wx = f.x * iz + r.x * ix;
-      wz = f.z * iz + r.z * ix;
-      const len = Math.hypot(wx, wz);
-      if (len > 1) { wx /= len; wz /= len; }
+      wx = ix; wz = iz; // _inputDir is already camera-relative and normalised
     }
 
     this.moving = !!(wx || wz);
@@ -176,15 +241,18 @@ export class HeroController {
       const step = HERO_SPEED * dt;
       const nx = this.pos.x + wx * step;
       let y = this.groundAt(nx, this.pos.z);
-      if (y !== null) { this.pos.x = nx; this.pos.y = y; }
+      if (y !== null && this._tetherOk(nx, this.pos.z)) { this.pos.x = nx; this.pos.y = y; }
+      else if (y === null && this.groundRaw(nx, this.pos.z) === null && this._tetherOk(nx, this.pos.z)) { this.pos.x = nx; this._fall(); } // off the edge
       const nz = this.pos.z + wz * step;
       y = this.groundAt(this.pos.x, nz);
-      if (y !== null) { this.pos.z = nz; this.pos.y = y; }
+      if (y !== null && this._tetherOk(this.pos.x, nz)) { this.pos.z = nz; this.pos.y = y; }
+      else if (y === null && this.groundRaw(this.pos.x, nz) === null && this._tetherOk(this.pos.x, nz)) { this.pos.z = nz; this._fall(); }
       if (faceYaw === null) this.yaw = Math.atan2(wx, wz);
     } else {
-      // terrain may have been blasted from under us
+      // terrain may have been blasted from under us: step down, or fall if nothing is left
       const y = this.groundAt(this.pos.x, this.pos.z);
       if (y !== null) this.pos.y = y;
+      else if (this.groundRaw(this.pos.x, this.pos.z) === null) this._fall();
     }
     if (faceYaw !== null) this.yaw = faceYaw;
     if (this.auto && before) {
@@ -204,9 +272,9 @@ export class HeroController {
     const now = performance.now();
     if (now - this._lastSent >= 1000 / MOVE_SEND_HZ) {
       const s = this._sent;
-      if (Math.abs(s.x - this.pos.x) > 1e-3 || Math.abs(s.z - this.pos.z) > 1e-3 || Math.abs(s.yaw - this.yaw) > 1e-2) {
-        this.net.send(Message.MOVE, { x: this.pos.x, z: this.pos.z, yaw: this.yaw });
-        s.x = this.pos.x; s.z = this.pos.z; s.yaw = this.yaw;
+      if (Math.abs(s.x - this.pos.x) > 1e-3 || Math.abs(s.y - this.pos.y) > 1e-3 || Math.abs(s.z - this.pos.z) > 1e-3 || Math.abs(s.yaw - this.yaw) > 1e-2) {
+        this.net.send(Message.MOVE, { x: this.pos.x, y: this.pos.y, z: this.pos.z, yaw: this.yaw });
+        s.x = this.pos.x; s.y = this.pos.y; s.z = this.pos.z; s.yaw = this.yaw;
         this._lastSent = now;
       }
     }

@@ -34,6 +34,13 @@ export class ChatPanel {
       .chatpanel .quick button { background:#082130; color:#a9d6e6; border-color:#1a4a5f; box-shadow:0 2px 0 #041520; font-size:7px; padding:6px 7px 5px; }
       .chatpanel .hint { font-size:6px; color:#7fb6c9; margin-top:5px; }
       @media (max-width: 900px) { .chatpanel { left:12px; bottom:auto; top:44%; width:min(300px, 40vw); } .chatpanel .line { font-size:7px; } }
+      /* touch: under the compact scoreboard in the top-left corner, small lines that fade quickly */
+      @media (pointer: coarse) {
+        .chatpanel { left:6px; bottom:auto; top:104px; width:min(280px, 36vw); }
+        .chatpanel .line { font-size:6px; padding:3px 5px 2px; }
+        .chatpanel .box { padding:4px; } .chatpanel input { font-size:8px; padding:6px; } .chatpanel button { font-size:7px; padding:6px 7px 5px; }
+        .chatpanel .quick button { font-size:6px; padding:4px 5px 3px; } .chatpanel .hint { display:none; }
+      }
     </style>
     <div class="log" data-log></div>
     <div class="box">
@@ -60,7 +67,7 @@ export class ChatPanel {
 
   get isOpen() { return this.el.classList.contains("open"); }
   open() { this.el.classList.add("open"); this.input.focus(); for (const l of this.log.children) l.classList.remove("faded"); }
-  close() { this.el.classList.remove("open"); this.input.blur(); }
+  close() { this.el.classList.remove("open"); this.input.blur(); for (const l of this.log.children) if (l.dataset.expired) l.classList.add("faded"); } // old lines go back to hidden
   toggle() { this.isOpen ? this.close() : this.open(); }
 
   send() {
@@ -79,7 +86,7 @@ export class ChatPanel {
     line.innerHTML = `<span class="sq" style="background:${color}"></span><b style="color:${color}">${esc(msg.name)}${mine ? " (you)" : ""}</b>${esc(msg.text)}${msg.scope === "team" ? `<span class="scope">TEAM</span>` : ""}`;
     this.log.appendChild(line);
     while (this.log.children.length > CHAT_HISTORY) this.log.firstChild.remove();
-    const t = setTimeout(() => { if (!this.isOpen) line.classList.add("faded"); }, 12000);
+    const t = setTimeout(() => { line.dataset.expired = "1"; if (!this.isOpen) line.classList.add("faded"); }, matchMedia("(pointer: coarse)").matches ? 6000 : 12000);
     this.timers.add(t);
   }
 

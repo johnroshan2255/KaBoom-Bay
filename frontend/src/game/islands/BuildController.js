@@ -136,7 +136,8 @@ export class BuildController {
   commit(kind) {
     if (!this.enabled) return false;
     if (kind === "remove") {
-      this._hoverAt(0, 0, true);
+      // touch (third person) hovers a ring around the centre via updateCenterNear(): keep that hit instead of re-aiming at the exact centre, which sits on the hero now that the camera follows them
+      if (!this.hover?.removeId) this._hoverAt(0, 0, true);
       const id = this.hover?.removeId;
       if (id) this.net.send("remove_piece", id);
       this._hoverAt(0, 0, this.mode === "remove");

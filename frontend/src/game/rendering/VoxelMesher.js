@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { Block } from "@kaboom-bay/shared";
 import { getAtlas, TILE, TILE_COUNT, TILE_PX } from "./atlas.js";
-import { FLOWER_COLORS, cellShade, faceHash, grassTint, tilesFor } from "./palette.js";
+import { cellShade, faceHash, flowerColors, grassTint, tilesFor } from "./palette.js";
 import { quality } from "./quality.js";
+import { theme } from "./theme.js";
 
 /**
  * Builds one textured mesh per island from a VoxelGrid: visible faces only, atlas UVs per face,
@@ -23,17 +24,20 @@ const UV = [[0, 0], [1, 0], [1, 1], [0, 1]];
 const AO_LEVELS = [0.38, 0.6, 0.8, 1.0];
 const FACE_SHADE = [0.9, 0.9, 1.0, 0.5, 0.88, 0.88];
 const EDGE_SHADE = 0.86; // vertices on an exposed silhouette edge darken: reads as a bevelled voxel edge
-const MOSS = new THREE.Color(0x6fc45a);
 const _moss = new THREE.Color();
+const _mossBase = new THREE.Color();
 const MOSSY = new Set([Block.ROCK, Block.DIRT, Block.CARVED]);
 const CANOPY = new Set([Block.LEAF, Block.LEAF_AUTUMN]);
 
-let sharedMaterial = null;
+const materials = new Map(); // map id -> shared island material (one atlas per map)
 function material() {
-  if (!sharedMaterial) {
-    sharedMaterial = new THREE.MeshLambertMaterial({ map: getAtlas().texture, vertexColors: true });
+  const t = theme();
+  let m = materials.get(t.id);
+  if (!m) {
+    m = new THREE.MeshLambertMaterial({ map: getAtlas(t.id).texture, vertexColors: true });
+    materials.set(t.id, m);
   }
-  return sharedMaterial;
+  return m;
 }
 
 const _c = new THREE.Color();
@@ -72,6 +76,9 @@ export class VoxelMesher {
    * that are still there; the quality tier decides how many are drawn.
    */
   rebuild(grid, decor = null) {
+    const t = theme();
+    _mossBase.setHex(t.moss);
+    const FLOWER_COLORS = flowerColors();
     const flowers = quality.settings.decals ? (decor?.flowers ?? []).filter(([x, y, z]) => grid.get(x, y, z) === Block.GRASS && grid.get(x, y + 1, z) === Block.AIR) : [];
     // Count visible faces first so the typed arrays are sized once, then fill them in place.
     let faces = 0;
@@ -105,7 +112,7 @@ export class VoxelMesher {
         // sparse moss on stone and dirt sides (not undersides), like the reference's mossy ruins
         const mossy = MOSSY.has(block) && f !== 3 && y >= 2 && faceHash(x, y, z, f) < (f === 2 ? 0.4 : 0.16);
         // moss is a soft tint over the block's own tile, strongest on top faces (the reference's mossy ruins)
-        if (mossy) _moss.copy(MOSS).lerp(_c.setHex(0x9fb3a8), f === 2 ? 0.25 : 0.5);
+        if (mossy) _moss.copy(_mossBase).lerp(_c.setHex(t.mossMix), f === 2 ? 0.25 : 0.5);
 
         let tile = tiles[face.side];
         if (tile === TILE.STONE && face.side === 1) {

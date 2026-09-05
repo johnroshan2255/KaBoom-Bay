@@ -1,19 +1,13 @@
 import * as THREE from "three";
 import { Block } from "@kaboom-bay/shared";
 import { TILE } from "./atlas.js";
+import { theme } from "./theme.js";
 
-/** Average colour per block id - used for debris and anything that isn't textured. */
+/**
+ * Average colour per block id - used for debris and anything that isn't textured. Terrain colours come
+ * from the current map's theme (see blockColor()); building pieces are the same on every map.
+ */
 export const BLOCK_COLORS = {
-  [Block.ROCK]: 0x86a892,
-  [Block.SAND]: 0xf1d48e,
-  [Block.GRASS]: 0x5ec44c,
-  [Block.DIRT]: 0x8a5a34,
-  [Block.WOOD]: 0x8c5a2e,
-  [Block.LEAF]: 0x4cb955,
-  [Block.LEAF_AUTUMN]: 0xb8622a,
-  [Block.MUSHROOM]: 0xe04a3a,
-  [Block.STEM]: 0xf1e4c8,
-  [Block.CARVED]: 0x86a892,
   [Block.PLANK]: 0xd19a5a,
   [Block.BEAM]: 0x7a4a24,
   [Block.WALL]: 0xd9d3c4,
@@ -45,12 +39,14 @@ const TILES = {
 };
 export const tilesFor = (block) => TILES[block] ?? TILES[Block.ROCK];
 
-const cache = new Map();
+const cache = new Map(); // "mapId:block" -> Color
 export function blockColor(block) {
-  let c = cache.get(block);
+  const t = theme();
+  const key = `${t.id}:${block}`;
+  let c = cache.get(key);
   if (!c) {
-    c = new THREE.Color(BLOCK_COLORS[block] ?? 0xff00ff);
-    cache.set(block, c);
+    c = new THREE.Color(t.blocks[block] ?? BLOCK_COLORS[block] ?? 0xff00ff);
+    cache.set(key, c);
   }
   return c;
 }
@@ -68,12 +64,14 @@ export function faceHash(x, y, z, f) {
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
-export const FLOWER_COLORS = [0xffffff, 0xff8fc2, 0xffe36b];
+/** Flower decal colours of the current map (glowing spores in space, embers on the volcano). */
+export const flowerColors = () => theme().flowers;
 
-/** Grass gets a stronger hue drift between fresh and mossy green. */
+/** Grass gets a per-cell hue drift (fresh vs mossy green on the island; the theme sets the two ends). */
 export function grassTint(x, z, out) {
   let h = (x * 2654435761) ^ (z * 40503);
   h = ((h ^ (h >>> 15)) >>> 0) & 15;
   const t = h / 15;
-  return out.setRGB(0.85 + 0.25 * t, 1.0, 0.8 + 0.15 * (1 - t));
+  const { from, to } = theme().grassTint;
+  return out.setRGB(from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, from[2] + (to[2] - from[2]) * t);
 }

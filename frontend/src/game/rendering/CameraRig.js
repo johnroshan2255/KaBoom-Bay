@@ -15,6 +15,7 @@ export class CameraRig {
     this.yaw = 0;
     this.pitch = -0.1;
     this.locked = false;
+    this.lockEnabled = true; // off with touch controls: a granted lock freezes the pointer coordinates the look zone and joystick read
     this.onModeChange = null;
     this._onLockChange = () => { this.locked = document.pointerLockElement === canvas; };
     this._onMouseMove = (e) => {
@@ -40,7 +41,7 @@ export class CameraRig {
     if (mode === "first") { this.yaw = heroYaw; this.pitch = -0.1; this.requestLock(); }
     else if (document.pointerLockElement === this.canvas) document.exitPointerLock?.();
     if (mode === "top") { this.orbit.minPitch = 1.35; this.orbit.maxPitch = 1.52; this.orbit.pitch = 1.48; }
-    else { this.orbit.minPitch = 0.3; this.orbit.maxPitch = 1.2; if (mode === "third" && this.orbit.pitch > 1.2) this.orbit.pitch = 0.66; }
+    else { this.orbit.minPitch = 0.06; this.orbit.maxPitch = 1.5; if (mode === "third" && this.orbit.pitch > 1.5) this.orbit.pitch = 0.66; } // almost level to almost straight down
     this.onModeChange?.(mode);
   }
 
@@ -51,14 +52,14 @@ export class CameraRig {
   }
 
   requestLock() {
-    if (this.mode !== "first" || this.locked) return;
+    if (this.mode !== "first" || this.locked || !this.lockEnabled) return;
     // Not available in some iframes / headless browsers: fails synchronously or as a rejected promise, both harmless.
     try { this.canvas.requestPointerLock?.()?.catch?.(() => {}); } catch { /* fall back to unlocked mouse look */ }
   }
 
   look(dx, dy) {
     this.yaw -= dx * 0.0022;
-    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * 0.0022, -1.2, 1.25);
+    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * 0.0022, -1.5, 1.5);
   }
 
   /** Yaw the hero moves relative to: where the camera looks. */

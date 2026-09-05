@@ -20,6 +20,8 @@ import { TrajectoryPreview } from "./bombs/TrajectoryPreview.js";
 import { hud } from "../ui/hud.js";
 import { PlayerAvatar } from "./characters/CharacterFactory.js";
 import { Clouds } from "./rendering/Clouds.js";
+import { Backdrop } from "./rendering/Backdrop.js";
+import { setTheme, theme } from "./rendering/theme.js";
 import { sound } from "../audio/Sound.js";
 import { PLAYER_COLORS } from "@kaboom-bay/shared";
 
@@ -32,14 +34,15 @@ const _q = new THREE.Quaternion();
  * blasts carve the voxel terrain. Pick a landed bomb back up by tapping it.
  */
 export class Sandbox {
-  static async create(canvas, { seed = Date.now() % 100000 } = {}) {
+  static async create(canvas, { seed = Date.now() % 100000, map = undefined } = {}) {
     const sim = await LocalBombSim.create();
-    return new Sandbox(canvas, sim, seed);
+    return new Sandbox(canvas, sim, seed, map);
   }
 
-  constructor(canvas, sim, seed) {
+  constructor(canvas, sim, seed, map) {
     this.canvas = canvas;
     this.sim = sim;
+    setTheme(map); // `?map=volcano|ice|space` previews a map offline
     this.renderer = createRenderer(canvas);
     const { scene, water } = createScene();
     this.scene = scene;
@@ -47,7 +50,8 @@ export class Sandbox {
     this.orbit = new OrbitCamera(window.innerWidth / window.innerHeight);
     this.orbit.attach(canvas);
     this.effects = new Effects(scene);
-    this.clouds = new Clouds(scene);
+    this.clouds = theme().clouds ? new Clouds(scene, theme().clouds) : null;
+    this.backdrop = new Backdrop(scene);
     this.preview = new TrajectoryPreview(scene);
 
     this.island = new Island(scene, { seed });
@@ -256,7 +260,8 @@ export class Sandbox {
     }
 
     this.effects.update(dt);
-    this.clouds.update(dt);
+    this.clouds?.update(dt);
+    this.backdrop.update(dt, this.time ?? 0);
     this.water.update(dt);
     this.island.update(dt, this.time);
     this.avatar.update(dt, this.time);
@@ -274,7 +279,7 @@ export class Sandbox {
 
   _resize() {
     const w = window.innerWidth, h = window.innerHeight;
-    this.renderer.setSize(w, h, false);
+    this.renderer.fitViewport();
     this.orbit.resize(w, h);
   }
 }

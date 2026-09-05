@@ -29,7 +29,7 @@ export function stepBots(room, now) {
   for (const [key, bot] of room.bots) {
     if (now < bot.nextActionAt) continue;
     const player = room.state.players.get(key);
-    if (!player) continue;
+    if (!player || player.dead) continue;
     const grid = room.islands[player.islandIndex].grid;
     for (let attempt = 0; attempt < 12; attempt++) {
       const type = PIECE_TYPES[Math.floor(bot.rand() * PIECE_TYPES.length)];
@@ -47,7 +47,7 @@ function stepCombatBots(room, now) {
   for (const [key, bot] of room.bots) {
     if (now < bot.nextActionAt) continue;
     const player = state.players.get(key);
-    if (!player) continue;
+    if (!player || player.dead) continue;
     // a landed crate on our island is worth a detour
     const crate = [...state.crates.entries()].find(([, c]) => c.landed && c.islandIndex === player.islandIndex);
     if (crate && bot.rand() < 0.9) {
@@ -86,7 +86,7 @@ function stepCombatBots(room, now) {
       bot.nextActionAt = now + 600 + bot.rand() * 900; // "aiming"
       continue;
     }
-    const targets = [...state.players.values()].filter((p) => !sameTeam(p.islandIndex, player.islandIndex, state.mode));
+    const targets = [...state.players.values()].filter((p) => !sameTeam(p.islandIndex, player.islandIndex, state.mode) && !p.dead);
     const target = targets[Math.floor(bot.rand() * targets.length)];
     if (!target) { bot.nextActionAt = now + 1000; continue; }
     const c = islandCenter(target.islandIndex);

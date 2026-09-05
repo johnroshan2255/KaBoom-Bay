@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GRAVITY, WATER_LEVEL } from "@kaboom-bay/shared";
 import { blockColor } from "./palette.js";
 import { quality } from "./quality.js";
+import { theme } from "./theme.js";
 
 const _m = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -224,7 +225,7 @@ export class Effects {
   splash(position) {
     const p = position.clone();
     p.y = WATER_LEVEL;
-    this.smoke(p, 1.6, Math.max(2, Math.round(6 * quality.settings.smokeScale)), 0xcdf3ff);
+    this.smoke(p, 1.6, Math.max(2, Math.round(6 * quality.settings.smokeScale)), theme().splash); // sea spray, lava spatter, snow, void dust
   }
 
   update(dt) {

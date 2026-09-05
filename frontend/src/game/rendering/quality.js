@@ -6,11 +6,23 @@
 const TIERS = ["low", "medium", "high"];
 const KEY = "kaboom.quality";
 
+/**
+ * `pixelBudget` is the render target size in megapixels: the pixel ratio is whatever fills that budget on the
+ * current screen (capped at the device's own ratio). A phone's small, dense screen therefore renders at 2-3x
+ * and stays crisp, while a 1080p desktop lands at ~1.5x on high; the GPU cost is the same either way.
+ */
 const SETTINGS = {
-  high:   { pixelRatio: 1.5,  antialias: true,  shadows: true,  shadowMapSize: 2048, cloudShadows: true,  waterSegments: 80, waterDetail: true,  mistPuffs: 16, explosionLight: true,  smokeScale: 1,   embers: 34, decals: true,  waterfall: true },
-  medium: { pixelRatio: 1,    antialias: false, shadows: true,  shadowMapSize: 1024, cloudShadows: false, waterSegments: 40, waterDetail: true,  mistPuffs: 10, explosionLight: true,  smokeScale: 0.6, embers: 20, decals: true,  waterfall: true },
-  low:    { pixelRatio: 0.75, antialias: false, shadows: false, shadowMapSize: 512,  cloudShadows: false, waterSegments: 24, waterDetail: false, mistPuffs: 6,  explosionLight: false, smokeScale: 0.4, embers: 12, decals: false, waterfall: true },
+  high:   { pixelBudget: 4.5, antialias: true,  shadows: true,  shadowMapSize: 2048, cloudShadows: true,  waterSegments: 80, waterDetail: true,  mistPuffs: 16, explosionLight: true,  smokeScale: 1,   embers: 34, decals: true,  waterfall: true },
+  medium: { pixelBudget: 2.6, antialias: false, shadows: true,  shadowMapSize: 1024, cloudShadows: false, waterSegments: 40, waterDetail: true,  mistPuffs: 10, explosionLight: true,  smokeScale: 0.6, embers: 20, decals: true,  waterfall: true },
+  low:    { pixelBudget: 1.3, antialias: false, shadows: false, shadowMapSize: 512,  cloudShadows: false, waterSegments: 24, waterDetail: false, mistPuffs: 6,  explosionLight: false, smokeScale: 0.4, embers: 12, decals: false, waterfall: true },
 };
+
+/** Pixel ratio that spends the current tier's budget on a `width` x `height` CSS-pixel viewport. */
+export function pixelRatioFor(width = window.innerWidth, height = window.innerHeight) {
+  const dpr = window.devicePixelRatio || 1;
+  const fit = Math.sqrt((quality.settings.pixelBudget * 1e6) / Math.max(1, width * height));
+  return Math.max(0.6, Math.min(dpr, fit));
+}
 
 /** Returns [tier, locked]. A tier forced through the URL is never auto-downgraded. */
 function detect() {

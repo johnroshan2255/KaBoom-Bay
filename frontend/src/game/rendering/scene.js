@@ -1,20 +1,23 @@
 import * as THREE from "three";
 import { createWater } from "./Water.js";
 import { quality } from "./quality.js";
+import { theme } from "./theme.js";
 
 /**
- * Saturated cyan sky, one warm key light from the upper left with shadows,
- * and a cool sky / warm ground hemisphere for bounce - the studio-render lighting of the reference.
- * Shadow resolution follows the quality tier; a downgrade turns the shadow pass off entirely.
+ * Sky, one warm key light from the upper left with shadows, and a cool sky / warm ground hemisphere for
+ * bounce - the studio-render lighting of the reference. Colours and fog follow the current map's theme
+ * (cyan bay, ash-red volcano, white-out ice, dark void). Shadow resolution follows the quality tier; a
+ * downgrade turns the shadow pass off entirely.
  */
 export function createScene() {
+  const t = theme();
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1fbde6);
-  scene.fog = new THREE.FogExp2(0x1fbde6, 0.0028); // distance haze; the per-island mist does the rest
+  scene.background = new THREE.Color(t.sky);
+  scene.fog = new THREE.FogExp2(t.fog.color, t.fog.density); // distance haze; the per-island mist does the rest
 
-  scene.add(new THREE.HemisphereLight(0xa9e6ff, 0x9a8a5a, 1.15));
+  scene.add(new THREE.HemisphereLight(t.hemi.sky, t.hemi.ground, t.hemi.intensity));
 
-  const sun = new THREE.DirectionalLight(0xfff0d2, 2.6);
+  const sun = new THREE.DirectionalLight(t.sun.color, t.sun.intensity);
   sun.position.set(-34, 52, 22);
   const size = quality.settings.shadowMapSize;
   sun.shadow.mapSize.set(size, size);
@@ -26,8 +29,8 @@ export function createScene() {
   scene.add(sun);
   scene.add(sun.target);
 
-  // faint cool fill from the opposite side so shaded cliffs don't go black
-  const fill = new THREE.DirectionalLight(0x8fd8ff, 0.35);
+  // faint fill from the opposite side so shaded cliffs don't go black
+  const fill = new THREE.DirectionalLight(t.fill.color, t.fill.intensity);
   fill.position.set(30, 20, -30);
   scene.add(fill);
 

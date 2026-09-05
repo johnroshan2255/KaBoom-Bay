@@ -1,5 +1,5 @@
 import { schema, t } from "@colyseus/schema";
-import { GameMode, MatchPhase } from "@kaboom-bay/shared";
+import { DEFAULT_GAME, DEFAULT_MAP, GameMode, HERO_MAX_HP, MatchPhase } from "@kaboom-bay/shared";
 
 /** Per-player synced state. Map key is the Colyseus sessionId (or "bot-N"). */
 export const PlayerState = schema(
@@ -13,6 +13,10 @@ export const PlayerState = schema(
     isBot: t.boolean().default(false),
     bombs: t.map("uint8"), // special bombs collected from crates: BombType -> count
     selected: t.string().default("standard"), // BombType used for the next bomb
+    hp: t.uint8().default(HERO_MAX_HP),
+    dead: t.boolean().default(false), // bombed: hidden until the respawn
+    captures: t.uint8().default(0), // (legacy) flags brought home
+    holdMs: t.uint32().default(0), // capture the flag: total time holding the flag alone; CTF_HOLD_TO_WIN_MS wins
     x: t.float32().default(0),
     y: t.float32().default(0),
     z: t.float32().default(0),
@@ -64,6 +68,20 @@ export const CrateState = schema(
   "CrateState",
 );
 
+/** Capture the flag: the one flag. status: home (on the hub plaza) | held (above `holder`) | dropped (where the holder died). */
+export const FlagState = schema(
+  {
+    x: t.float32().default(0),
+    y: t.float32().default(0),
+    z: t.float32().default(0),
+    status: t.string().default("home"),
+    holder: t.string().default(""), // first holder (for display); every holder is in `holders`
+    holders: t.array("string"), // Bomb Squad style: several heroes can hold the flag at once and tug at it
+    droppedAt: t.number().default(0),
+  },
+  "FlagState",
+);
+
 /**
  * Whole-match synced state. Reset for every round; nothing is persisted.
  * Terrain damage is synced as diffs: (islandIndex << 16) | cellIndex.
@@ -72,6 +90,9 @@ export const BayState = schema(
   {
     phase: t.string().default(MatchPhase.LOBBY),
     mode: t.string().default(GameMode.FFA), // GameMode: "ffa" | "teams"
+    map: t.string().default(DEFAULT_MAP), // GameMap: island | volcano | ice | space (fixed for the room's lifetime)
+    game: t.string().default(DEFAULT_GAME), // GameType: classic | ctf (fixed for the room's lifetime)
+    flag: t.ref(FlagState), // capture the flag only
     buildMs: t.uint32().default(0), // phase lengths for this room (KABOOM_PHASE_SCALE may shorten them)
     combatMs: t.uint32().default(0),
     minutes: t.uint8().default(3), // match length picked by the host
@@ -87,6 +108,7 @@ export const BayState = schema(
     bombs: t.map(BombState),
     crates: t.map(CrateState),
     terrainDiffs: t.array("uint32"),
+    leftIslands: t.array("uint8"), // islands whose player quit mid-match: gone for everyone (no bot takes over)
   },
   "BayState",
 );

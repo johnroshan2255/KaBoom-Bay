@@ -24,7 +24,7 @@ app.get("/code/:code", async (req, res) => {
     if (!room) return res.status(404).json({ error: "not_found" });
     if (room.locked) return res.status(409).json({ error: "started" });
     if (room.clients >= room.maxClients) return res.status(409).json({ error: "full" });
-    res.json({ roomId: room.roomId, mode: room.metadata?.mode, clients: room.clients, maxClients: room.maxClients });
+    res.json({ roomId: room.roomId, mode: room.metadata?.mode, map: room.metadata?.map, game: room.metadata?.game, clients: room.clients, maxClients: room.maxClients });
   } catch (err) {
     console.error("[KaBoom Bay] /code failed", err);
     res.status(500).json({ error: "server" });
@@ -38,7 +38,7 @@ app.get("/rooms", async (_req, res) => {
     res.json(rooms
       .filter((r) => r.clients < r.maxClients)
       .sort((a, b) => b.clients - a.clients)
-      .map((r) => ({ roomId: r.roomId, clients: r.clients, maxClients: r.maxClients, mode: r.metadata?.mode })));
+      .map((r) => ({ roomId: r.roomId, clients: r.clients, maxClients: r.maxClients, mode: r.metadata?.mode, map: r.metadata?.map, game: r.metadata?.game })));
   } catch (err) {
     console.error("[KaBoom Bay] /rooms failed", err);
     res.status(500).json([]);
@@ -48,7 +48,7 @@ app.get("/rooms", async (_req, res) => {
 const httpServer = http.createServer(app);
 const gameServer = new Server({ server: httpServer });
 
-gameServer.define(ROOM_NAME, BayRoom).filterBy(["mode"]).sortBy({ clients: -1 }); // modes never mix; fill the fullest bay first
+gameServer.define(ROOM_NAME, BayRoom).filterBy(["mode", "map", "game"]).sortBy({ clients: -1 }); // modes, maps and game types never mix; fill the fullest bay first
 
 await initPhysics(); // Rapier WASM, once per process
 gameServer.listen(PORT).then(() => {

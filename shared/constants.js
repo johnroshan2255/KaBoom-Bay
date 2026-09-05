@@ -11,6 +11,20 @@ export const MIN_PLAYERS_TO_START = 2;           // humans needed for the automa
 
 /** Free-for-all: every island for itself. Teams: islands 0+1 (north row) vs 2+3 (south row). */
 export const GameMode = Object.freeze({ FFA: "ffa", TEAMS: "teams" });
+/**
+ * Game type. Classic: build, then bomb islands for coins. Capture the Flag: bridges link every island to a hub
+ * in the middle of the bay; carry the flag from the hub back to your island to score, bomb rival bridges
+ * (they grow back) and rivals (they respawn). Both types play in either mode, on any map.
+ */
+export const GameType = Object.freeze({ CLASSIC: "classic", CTF: "ctf" });
+export const DEFAULT_GAME = GameType.CLASSIC;
+export const GAME_LIST = Object.freeze([GameType.CLASSIC, GameType.CTF]);
+export const GAMES = Object.freeze({
+  [GameType.CLASSIC]: { name: "Classic", tagline: "Build, then bomb the islands" },
+  [GameType.CTF]: { name: "Capture the Flag", tagline: "Bridges, one flag, many bombs" },
+});
+export const normalizeGame = (g) => (GAME_LIST.includes(g) ? g : DEFAULT_GAME);
+export const gameName = (g) => GAMES[normalizeGame(g)].name;
 export const DEFAULT_GAME_MODE = GameMode.FFA;
 export const TEAM_SIZE = 2;
 export const TEAM_COUNT = MAX_PLAYERS / TEAM_SIZE;
@@ -96,8 +110,14 @@ export const HERO_RESPAWN_COOLDOWN_MS = 500;     // min gap between fall respawn
 
 // ---------- Hero ----------
 export const HERO_SPEED = 5.5;                   // walk speed, world units per second
+export const HERO_MAX_HP = 100;
+export const BLAST_DAMAGE = 70;                  // hp taken at the centre of a standard blast (scales with the bomb's blast radius; 15% at the knockback edge)
+export const HERO_RESPAWN_MS = 3_000;            // bombed heroes come back on their beach after this
+export const COINS_PER_KILL = 20;                // bombing a rival earns this
 export const HERO_EYE_HEIGHT = 1.55;             // first-person camera height above the feet
 export const HERO_STEP_HEIGHT = 1.05;            // can walk up one block
+export const HERO_JUMP_SPEED = 9.5;              // take-off speed: apex = v^2 / (2g) = 2.26 blocks, enough to get onto a 2-block wall
+export const HERO_JUMP_MAX_RISE = 2.6;           // server: a MOVE may report feet this far above the last accepted height (a jump)
 export const MOVE_SEND_HZ = 15;                  // position updates to the server
 export const MOVE_MAX_STEP = 4;                  // server rejects teleports longer than this per update
 export const THROW_CHARGE_MS = 1100;             // first-person: hold to charge from 20% to 100% power
@@ -105,6 +125,22 @@ export const THROW_CHARGE_MS = 1100;             // first-person: hold to charge
 // ---------- Physics ----------
 export const GRAVITY = -20;                      // stronger than Earth for snappy arcade arcs
 export const PHYSICS_STEP = 1 / 60;
+
+// ---------- Capture the Flag ----------
+// The arena is a fifth voxel grid (index ARENA_INDEX) holding the hub bar between the island rows, the flag plaza
+// and one two-block-wide plank bridge per island. Its deck is level with the beaches (feet at BRIDGE_DECK_Y + 1).
+export const ARENA_INDEX = 4;
+export const ARENA_SIZE_X = 44;
+export const ARENA_SIZE_Z = 40;
+export const ARENA_ORIGIN = Object.freeze({ x: -22, y: 0, z: -20 });
+export const BRIDGE_DECK_Y = 4;
+export const FLAG_PICKUP_RADIUS = 1.8;           // GRAB within this distance of the flag takes it (several players can hold it at once)
+export const FLAG_TETHER = 0.9;                  // holders of a contested flag can only close in on the others (this close), never pull away: a real tug of war
+export const FLAG_RETURN_MS = 12_000;            // a dropped flag goes back to the hub after this
+export const BRIDGE_REBUILD_MS = 2_500;          // a blown bridge cell starts growing back after this
+export const BRIDGE_REBUILD_STEP_MS = 70;        // cells regrow one after another from the island side, this far apart
+export const COINS_PER_CAPTURE = 50;             // (unused since hold-to-win; kept for the tests' constants list)
+export const CTF_HOLD_TO_WIN_MS = 60_000;         // capture the flag: the first player (team) to hold the flag this long in total wins; no clock otherwise
 
 // ---------- Islands & building ----------
 export const ISLAND_COUNT = MAX_PLAYERS;
@@ -156,6 +192,10 @@ export const Message = Object.freeze({
   START_NOW: "start_now",                        // client -> server (lobby): begin now, bots fill the empty islands
   SWITCH_TEAM: "switch_team",                    // client -> server (lobby, teams mode): { team } to join, default: the other team
   PHASE_CHANGED: "phase_changed",
+  MATCH_CLOSED: "match_closed",
+  HERO_KILLED: "hero_killed",                    // server -> clients: { victim, by, name, byName, x, y, z } a hero was bombed (respawns after HERO_RESPAWN_MS)
+  FLAG_EVENT: "flag_event",
+  GRAB_FLAG: "grab_flag",                        // client -> server (capture the flag): take the flag next to me, or let go of it                      // server -> clients: { type: "pickup" | "drop" | "capture" | "return", by, name, team, captures }                  // server -> clients: { reason: "host_left", name } the room is closing mid-match
   BOMB_EXPLODED: "bomb_exploded",
   MATCH_RESULTS: "match_results",
 });
@@ -172,14 +212,16 @@ export const PLAYER_COLOR_NAMES = Object.freeze(["Red", "Blue", "Yellow", "Green
 export const TEAM_COLORS = Object.freeze([0xff5c5c, 0x4da3ff]); // team 0 (north), team 1 (south)
 export const TEAM_NAMES = Object.freeze(["Red Team", "Blue Team"]);
 
-/** World-space centre of island `index` in the 2x2 layout. */
+/** World-space centre of island `index` in the 2x2 layout (the CTF arena, ARENA_INDEX, sits in the middle). */
 export function islandCenter(index) {
+  if (index === ARENA_INDEX) return { x: 0, y: 0, z: 0 };
   const half = ISLAND_SPACING / 2;
   return { x: index % 2 === 0 ? -half : half, y: 0, z: index < 2 ? -half : half };
 }
 
 /** World position of island `index`'s grid corner (0,0,0). */
 export function islandOrigin(index) {
+  if (index === ARENA_INDEX) return { ...ARENA_ORIGIN };
   const c = islandCenter(index);
   return { x: c.x - ISLAND_SIZE / 2, y: 0, z: c.z - ISLAND_SIZE / 2 };
 }

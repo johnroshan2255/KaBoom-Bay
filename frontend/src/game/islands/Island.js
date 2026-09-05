@@ -4,15 +4,16 @@ import { VoxelMesher } from "../rendering/VoxelMesher.js";
 import { MistRing } from "../rendering/Mist.js";
 import { Waterfall } from "../rendering/Waterfall.js";
 import { quality } from "../rendering/quality.js";
+import { theme } from "../rendering/theme.js";
 
 /**
  * One player's island: voxel grid + world placement + mesh.
  * `origin` is the world position of the grid's (0,0,0) corner.
  */
 export class Island {
-  constructor(scene, { index = 0, seed = 1, center = new THREE.Vector3() } = {}) {
+  constructor(scene, { index = 0, seed = 1, center = new THREE.Vector3(), map = theme().id } = {}) {
     this.index = index;
-    const gen = generateIsland({ seed });
+    const gen = generateIsland({ seed, map });
     this.grid = gen.grid;
     this.palms = gen.palms; // every trunk / prop base (spawn pad avoidance)
     this.decor = gen.decor;
@@ -21,7 +22,7 @@ export class Island {
     this.mesher = new VoxelMesher(scene, this.origin);
     this.mesher.rebuild(this.grid, this.decor);
     this.mist = new MistRing(scene, this.center, this.grid.sizeX / 2 - 1, { seed: seed * 7 + 3 });
-    this.waterfall = gen.waterfall && quality.settings.waterfall ? new Waterfall(scene, { origin: this.origin, spot: gen.waterfall }) : null;
+    this.waterfall = gen.waterfall && theme().waterfall && quality.settings.waterfall ? new Waterfall(scene, { origin: this.origin, spot: gen.waterfall }) : null;
     this._unsubscribe = quality.onChange(() => this.mesher.rebuild(this.grid, this.decor)); // decal budget changed
   }
 

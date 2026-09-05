@@ -1,5 +1,5 @@
 import { Client, getStateCallbacks } from "@colyseus/sdk";
-import { Message, ROOM_NAME } from "@kaboom-bay/shared";
+import { Message, ROOM_NAME, normalizeGame, normalizeMap } from "@kaboom-bay/shared";
 
 /** Thin wrapper around the Colyseus SDK. The server is authoritative; we send intents only. */
 export class NetworkClient {
@@ -13,11 +13,13 @@ export class NetworkClient {
 
   /**
    * Joins or creates a match and waits for the first full state.
-   * `quick: true` joins the fullest open bay in any mode (people already waiting) and only creates a
-   * new room, in `mode`, when nobody is waiting.
+   * `quick: true` joins the fullest open bay on the chosen map, in any mode (people already waiting), and
+   * only creates a new room, in `mode` on `map`, when nobody is waiting there.
    */
   async joinMatch(options = {}) {
     const { roomId, quick = false, host = false, code = null, ...opts } = options;
+    opts.map = normalizeMap(opts.map);
+    opts.game = normalizeGame(opts.game);
     if (code) {
       // a typed or linked join code must resolve; never fall back to a random room
       const found = await this.lookupCode(code);
@@ -29,6 +31,7 @@ export class NetworkClient {
     if (!this.room && roomId) this.room = await this.client.joinById(roomId, opts).catch(() => null);
     if (!this.room && quick) {
       for (const r of await this.openRooms()) {
+        if ((r.map && r.map !== opts.map) || (r.game && r.game !== opts.game)) continue;
         this.room = await this.client.joinById(r.roomId, opts).catch(() => null);
         if (this.room) break;
       }

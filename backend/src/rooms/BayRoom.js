@@ -1,9 +1,9 @@
 import { Room, matchMaker } from "colyseus";
-import { CHAT_RATE_MS, DEFAULT_BOTS, DEFAULT_MATCH_MINUTES, GameMode, MAX_BOTS, sanitizeChat, sameTeam, MAX_PLAYERS, MIN_PLAYERS_TO_START, MatchPhase, Message, ROOM_NAME, SERVER_TICK_MS, TEAM_COUNT, matchDurations, normalizeMode, pickIsland, scaledDurations, teamIslands, teamOf } from "@kaboom-bay/shared";
-import { BayState, PlayerState } from "../schema/BayState.js";
+import { CHAT_RATE_MS, DEFAULT_BOTS, DEFAULT_MATCH_MINUTES, GameMode, MAX_BOTS, sanitizeChat, sameTeam, MAX_PLAYERS, MIN_PLAYERS_TO_START, MatchPhase, Message, ROOM_NAME, SERVER_TICK_MS, TEAM_COUNT, matchDurations, normalizeGame, normalizeMap, normalizeMode, pickIsland, scaledDurations, teamIslands, teamOf } from "@kaboom-bay/shared";
+import { BayState, FlagState, PlayerState } from "../schema/BayState.js";
 import { createIslands } from "../logic/islands.js";
 import { placePiece, removePiece } from "../logic/building.js";
-import { beginMatch, stepMatch } from "../logic/match.js";
+import { beginMatch, grabFlag, removeIsland, stepMatch } from "../logic/match.js";
 import { MatchPhysics } from "../logic/physics.js";
 import { armBomb, grabBomb, selectBomb, throwBomb } from "../logic/bombs.js";
 import { handleMove, heroRespawn, placeAtSpawn } from "../logic/players.js";
@@ -24,7 +24,8 @@ const sanitizeName = (n, fallback) => (typeof n === "string" ? n.replace(/[^\w \
 
 /**
  * Authoritative match room: 4 islands, one short round, nothing persisted.
- * Created per game mode (`options.mode`, see index.js filterBy): free-for-all or 2v2 teams.
+ * Created per game mode and map (`options.mode`, `options.map`, see index.js filterBy): free-for-all or
+ * 2v2 teams on one of the four maps.
  */
 export class BayRoom extends Room {
   maxClients = MAX_PLAYERS;
@@ -42,10 +43,15 @@ export class BayRoom extends Room {
     this.knockedAt = new Map(); // sessionId -> time a blast last threw this hero
     this.lobbyOpenedAt = Date.now(); // public lobby: a lone player waits durations.soloWait before the countdown starts
     this.respawnedAt = new Map(); // sessionId -> time of the last fall respawn
+    this.deadUntil = new Map(); // sessionId -> time a bombed hero respawns
+    this.rebuild = []; // capture the flag: bridge cells growing back [{ cell, block, at }]
 
     this.setState(new BayState({
       seed: (Math.random() * 0xffffffff) >>> 0,
       mode: normalizeMode(options.mode),
+      map: normalizeMap(options.map),
+      game: normalizeGame(options.game),
+      flag: new FlagState(),
       buildMs: this.durations[MatchPhase.BUILD],
       combatMs: this.durations[MatchPhase.COMBAT],
       minutes: DEFAULT_MATCH_MINUTES,
@@ -53,9 +59,9 @@ export class BayRoom extends Room {
       isPrivate: options.private === true,
     }));
     this.state.code = await uniqueCode();
-    await this.setMetadata({ mode: this.state.mode, code: this.state.code });
+    await this.setMetadata({ mode: this.state.mode, map: this.state.map, game: this.state.game, code: this.state.code });
     if (this.state.isPrivate) await this.setPrivate(true); // hosted rooms are reached by code or link only
-    this.islands = createIslands(this.state.seed);
+    this.islands = createIslands(this.state.seed, this.state.map);
     this.physics = new MatchPhysics(this.islands);
 
     this.onMessage(Message.PLAYER_READY, (client, ready) => {
@@ -86,6 +92,7 @@ export class BayRoom extends Room {
     this.onMessage(Message.ARM_BOMB, (client) => armBomb(this, client.sessionId));
     this.onMessage(Message.THROW_BOMB, (client, msg) => throwBomb(this, client.sessionId, msg));
     this.onMessage(Message.GRAB_BOMB, (client, id) => grabBomb(this, client.sessionId, id));
+    this.onMessage(Message.GRAB_FLAG, (client) => grabFlag(this, client.sessionId));
 
     this.setSimulationInterval(() => stepMatch(this), SERVER_TICK_MS);
   }
@@ -99,7 +106,7 @@ export class BayRoom extends Room {
     placeAtSpawn(this, player);
     this.state.players.set(client.sessionId, player);
     if (!this.state.hostId) this.state.hostId = client.sessionId; // first human hosts: picks bots and match length
-    client.send(Message.WELCOME, { now: Date.now(), islandIndex, mode: this.state.mode });
+    client.send(Message.WELCOME, { now: Date.now(), islandIndex, mode: this.state.mode, map: this.state.map, game: this.state.game });
   }
 
   /**
@@ -168,18 +175,30 @@ export class BayRoom extends Room {
 
   onReconnect(client) {
     const player = this.state.players.get(client.sessionId);
-    if (player) client.send(Message.WELCOME, { now: Date.now(), islandIndex: player.islandIndex, mode: this.state.mode });
+    if (player) client.send(Message.WELCOME, { now: Date.now(), islandIndex: player.islandIndex, mode: this.state.mode, map: this.state.map, game: this.state.game });
   }
 
-  /** Final departure (consented leave, or the reconnection window ran out). */
+  /**
+   * Final departure (consented leave, or the reconnection window ran out).
+   * Mid-match: the host leaving ends the match for everyone (MATCH_CLOSED, then the room closes); anyone else
+   * takes their island with them. Results: the seat is parked until the round resets. Lobby: the seat frees up.
+   */
   onLeave(client) {
     const player = this.state.players.get(client.sessionId);
     if (!player) return;
+    const inMatch = this.state.phase === MatchPhase.BUILD || this.state.phase === MatchPhase.COMBAT;
 
-    if (this.state.phase !== MatchPhase.LOBBY) {
-      // Keep the island in play: a bot takes over the seat.
+    if (inMatch && this.state.hostId === client.sessionId) {
+      this.broadcast(Message.MATCH_CLOSED, { reason: "host_left", name: player.name });
+      this.state.players.delete(client.sessionId);
+      this.disconnect();
+      return;
+    }
+    if (inMatch) {
+      removeIsland(this, client.sessionId, player);
+    } else if (this.state.phase === MatchPhase.RESULTS) {
       player.connected = false;
-      player.isBot = true;
+      player.isBot = true; // parked: resetRound() drops bots
       this.bots.set(client.sessionId, { nextActionAt: 0, rand: Math.random });
     } else {
       this.state.players.delete(client.sessionId);

@@ -24,6 +24,13 @@ export class MatchPhysics {
     for (let i = 0; i < islands.length; i++) this.rebuildIsland(i);
   }
 
+  /** A grid added after construction (the capture-the-flag arena, ARENA_INDEX): colliders like any island. */
+  addIsland(i) {
+    this.terrain[i] = [];
+    this.disabled?.delete(i);
+    this.rebuildIsland(i);
+  }
+
   /** An island that is not in play: no colliders, so bombs fly through where it would have been. */
   disableIsland(i) {
     for (const c of this.terrain[i]) this.world.removeCollider(c, false);

@@ -12,9 +12,9 @@ const _s = new THREE.Vector3();
  * whole sky is a single draw call (two with shadows). Cloud shadows are a high-tier luxury.
  */
 export class Clouds {
-  constructor(scene, { count = 11, seed = 9 } = {}) {
+  constructor(scene, { count = 11, seed = 9, color = 0xffffff, opacity = 0.9 } = {}) {
     this.scene = scene;
-    this.material = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+    this.material = new THREE.MeshLambertMaterial({ color, transparent: true, opacity });
     this.geometry = new THREE.BoxGeometry(1, 1, 1);
     this.parts = []; // { cloud, offset: Vector3, scale: Vector3 }
     this.clouds = []; // { x, y, z, speed }

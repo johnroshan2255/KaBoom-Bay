@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { WATER_LEVEL } from "@kaboom-bay/shared";
 import { quality } from "./quality.js";
+import { theme } from "./theme.js";
 
 /**
  * Low-lying mist hugging an island's cliffs: a ring of soft camera-facing puffs that drift, bob and
@@ -98,6 +99,7 @@ export class MistRing {
     this.geometry.setIndex(index);
     this.geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 2, 0), radius + 12);
     this.mesh = new THREE.Mesh(this.geometry, material());
+    material().uniforms.uColor.value.setHex(theme().mist); // one match at a time: the shared material follows the current map
     this.mesh.position.set(center.x, 0, center.z);
     this.mesh.renderOrder = 2;
     scene.add(this.mesh);
